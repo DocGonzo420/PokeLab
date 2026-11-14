@@ -1,0 +1,910 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Log your Pokemon cards from photos with official set numbers, rarity, condition and live prices.">
+<meta name="theme-color" content="#131920">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Poke Lab">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Poke Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,600..800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: a binder page. Sticky value header, filter strip, one column of sleeves (rows), a fixed Add button. Sheets slide up for adding and for card details. */
+:root{
+  --bg:#ECEFF3; --surface:#FFFFFF; --sunk:#E2E6EC; --ink:#131920; --muted:#5A6572; --line:#D3D9E1;
+  --accent:#C9362B; --accent-ink:#FFFFFF; --focus:#2F6FEB;
+  --ok:#1F7A4D; --warn:#A35D00;
+  --tier-common:#6B7684; --tier-rare:#2F62C9; --tier-ultra:#7A3FC2; --tier-secret:#A86F00;
+  --holo:linear-gradient(100deg,#ff8a8a,#ffd36e 22%,#9cf0a8 42%,#79c7ff 62%,#c49bff 82%,#ff8ad1);
+  --f-display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --f-body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --r:12px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0E1217; --surface:#171C23; --sunk:#11161C; --ink:#E8ECF1; --muted:#98A3AF; --line:#2A323C;
+  --accent:#EE5A4A; --accent-ink:#1A0B09; --focus:#7AA7FF; --ok:#5CC38E; --warn:#E3A44A;
+  --tier-common:#9AA5B2; --tier-rare:#79A2F2; --tier-ultra:#B994F0; --tier-secret:#E4B54E;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E1217; --surface:#171C23; --sunk:#11161C; --ink:#E8ECF1; --muted:#98A3AF; --line:#2A323C;
+  --accent:#EE5A4A; --accent-ink:#1A0B09; --focus:#7AA7FF; --ok:#5CC38E; --warn:#E3A44A;
+  --tier-common:#9AA5B2; --tier-rare:#79A2F2; --tier-ultra:#B994F0; --tier-secret:#E4B54E;
+  color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--f-body);-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.wrap{max-width:720px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.mono{font-family:var(--f-mono);font-size:.86em;letter-spacing:0;font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.num{font-variant-numeric:tabular-nums}
+
+/* Header */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line)}
+.top .wrap{padding-block:12px 12px;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;gap:2px;min-width:0}
+.brand h1{margin:0;font:800 22px/1 var(--f-display);font-stretch:85%;letter-spacing:.01em;text-wrap:balance}
+.brand .sub{font-size:12px;color:var(--muted)}
+.holo-rule{height:3px;background:var(--holo);opacity:.85}
+.value{text-align:right}
+.value .label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.value .big{font:800 28px/1.05 var(--f-display);font-stretch:80%;font-variant-numeric:tabular-nums}
+.value .meta{font-size:12px;color:var(--muted)}
+
+/* Notices */
+.notice{margin:12px 0 0;padding:10px 12px;border-radius:10px;background:var(--sunk);border:1px solid var(--line);font-size:13px;color:var(--muted);display:flex;gap:10px;align-items:flex-start}
+.notice b{color:var(--ink);font-weight:600}
+.notice .x{margin-left:auto;background:none;border:0;cursor:pointer;color:var(--muted);padding:0 2px;font-size:16px;line-height:1}
+
+/* Filters */
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.filters .search{grid-column:1/-1}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+input[type=search],input[type=text],input[type=number],select{width:100%;min-width:0;height:42px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface)}
+@media (min-width:620px){.filters{grid-template-columns:2fr 1fr 1fr 1fr}.filters .search{grid-column:auto}}
+
+/* Collection list */
+.list{display:flex;flex-direction:column;gap:8px;margin:14px 0 120px;padding:0;list-style:none}
+.row{display:grid;grid-template-columns:56px 1fr auto;gap:12px;align-items:center;padding:8px 12px 8px 8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);cursor:pointer;text-align:left;width:100%}
+.row:hover{border-color:var(--muted)}
+.thumb{width:56px;aspect-ratio:63/88;border-radius:5px;background:var(--sunk);overflow:hidden;display:grid;place-items:center;max-width:100%}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.row .main{min-width:0;display:flex;flex-direction:column;gap:3px}
+.row .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .setline{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid currentColor;white-space:nowrap}
+.chip.t-common{color:var(--tier-common)}.chip.t-rare{color:var(--tier-rare)}.chip.t-ultra{color:var(--tier-ultra)}.chip.t-secret{color:var(--tier-secret)}
+.chip.grade{color:var(--ink);border-color:var(--line);background:var(--sunk)}
+.row .price{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.row .price b{font:700 17px/1 var(--f-display);font-stretch:85%;font-variant-numeric:tabular-nums}
+.row .price span{font-size:11px;color:var(--muted)}
+
+.empty{margin:28px 0 120px;padding:24px 20px;border:1.5px dashed var(--line);border-radius:16px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center}
+.empty h2{margin:0;font:800 22px/1.15 var(--f-display);font-stretch:85%;text-wrap:balance}
+.empty p{margin:0;color:var(--muted);max-width:44ch}
+.sleeve{width:84px;aspect-ratio:63/88;border-radius:8px;border:2px solid var(--line);position:relative;overflow:hidden;background:var(--sunk)}
+.sleeve::after{content:"";position:absolute;inset:0;background:var(--holo);opacity:.28}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 16px;border-radius:11px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-weight:600;text-decoration:none;color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--accent);border-color:var(--accent);background:transparent}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.small{height:34px;padding:0 12px;font-size:13px}
+.linkbtn{background:none;border:0;padding:0;color:var(--focus);cursor:pointer;font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.fab{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:6;height:54px;padding:0 22px;border-radius:999px;border:0;background:var(--ink);color:var(--bg);font:700 16px/1 var(--f-display);font-stretch:90%;letter-spacing:.02em;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgb(0 0 0 / .25);cursor:pointer}
+.fab .dot{width:22px;height:22px;border-radius:6px;background:var(--holo)}
+
+/* Sheets */
+dialog.sheet{border:0;padding:0;margin:auto auto 0;width:100%;max-width:720px;max-height:92vh;max-height:92dvh;border-radius:18px 18px 0 0;background:var(--surface);color:var(--ink);overflow:hidden}
+dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
+@media (min-width:760px){dialog.sheet{margin:auto;border-radius:18px;max-height:88vh}}
+.sheet-inner{display:flex;flex-direction:column;max-height:inherit}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line)}
+.sheet-head h2{margin:0;font:800 19px/1.1 var(--f-display);font-stretch:85%}
+.close{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:18px;line-height:1}
+.sheet-body{overflow:auto;padding:16px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px}
+.section-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 6px}
+
+.pickers{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.picker{height:96px;border-radius:14px;border:1.5px dashed var(--line);background:var(--sunk);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;font-weight:600;position:relative}
+.picker small{font-weight:400;color:var(--muted);font-size:12px}
+.picker input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+
+.shot{display:grid;grid-template-columns:110px 1fr;gap:14px;align-items:start}
+.shot img{width:110px;aspect-ratio:63/88;object-fit:cover;border-radius:8px;background:var(--sunk);max-width:100%}
+.status{display:flex;flex-direction:column;gap:6px;min-width:0}
+.status .line{font-size:14px}
+.read{font-size:13px;color:var(--muted)}
+.spinner{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:spin .8s linear infinite;display:inline-block;vertical-align:-3px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+
+.cands{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.cand{display:grid;grid-template-columns:42px 1fr auto;gap:10px;align-items:center;padding:8px 10px 8px 8px;border:1.5px solid var(--line);border-radius:12px;cursor:pointer;background:var(--surface);width:100%;text-align:left}
+.cand[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.cand .thumb{width:42px}
+.cand .t{min-width:0}
+.cand .t b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.cand .t span{font-size:12px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cand .tick{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line)}
+.cand[aria-pressed="true"] .tick{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 4px var(--surface)}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.qty{display:flex;align-items:center;gap:6px}
+.qty button{width:42px;height:42px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:18px}
+.qty input{text-align:center;width:56px;flex:none}
+
+/* Grade "slab label" */
+.slab{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.slab-top{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:12px 14px;background:var(--sunk)}
+.slab-top .k{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.slab-top .g{font:800 34px/1 var(--f-display);font-stretch:80%;text-align:right}
+.slab-top .g small{display:block;font:500 11px/1.2 var(--f-body);color:var(--muted);letter-spacing:.02em}
+.slab dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;padding:12px 14px;font-size:13.5px}
+.slab dt{color:var(--muted)}
+.slab dd{margin:0;min-width:0}
+.slab .disclaim{padding:0 14px 12px;font-size:12px;color:var(--muted)}
+
+/* Detail */
+.detail-hero{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.detail-hero figure{margin:0;display:flex;flex-direction:column;gap:6px}
+.detail-hero img{width:100%;aspect-ratio:63/88;object-fit:cover;border-radius:10px;background:var(--sunk);max-width:100%}
+.detail-hero figcaption{font-size:11px;color:var(--muted);text-align:center}
+.ph{width:100%;aspect-ratio:63/88;border-radius:10px;background:var(--sunk);display:grid;place-items:center;text-align:center;padding:10px;font-size:12px;color:var(--muted);max-width:100%}
+.facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.fact{padding:10px 12px;border:1px solid var(--line);border-radius:10px;min-width:0}
+.fact .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.fact .v{font-weight:600;overflow-wrap:anywhere}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+tbody tr:last-child td{border-bottom:0}
+tr.mine td{background:var(--sunk);font-weight:600}
+.src{font-size:12px;color:var(--muted)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.confirm{padding:12px;border:1px solid var(--accent);border-radius:10px;display:flex;flex-direction:column;gap:10px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;max-width:calc(100% - 32px)}
+.err{color:var(--accent);font-size:13px}
+</style>
+
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <h1>Poke Lab</h1>
+      <span class="sub" id="modeLine">Card catalogue</span>
+    </div>
+    <div class="value">
+      <div class="label">Collection value</div>
+      <div class="big" id="totalValue">$0.00</div>
+      <div class="meta" id="totalMeta">0 cards</div>
+    </div>
+  </div>
+  <div class="holo-rule"></div>
+</header>
+
+<main class="wrap">
+  <div id="notices"></div>
+  <div class="filters" id="filters">
+    <div class="field search"><label for="q">Search your cards</label><input id="q" type="search" placeholder="Name, set or number" autocomplete="off"></div>
+    <div class="field"><label for="fSet">Set</label><select id="fSet"><option value="">All sets</option></select></div>
+    <div class="field"><label for="fRarity">Rarity</label><select id="fRarity"><option value="">All rarities</option></select></div>
+    <div class="field"><label for="fSort">Sort</label>
+      <select id="fSort"><option value="value">Highest value</option><option value="recent">Recently added</option><option value="set">Set and number</option><option value="name">Name</option></select></div>
+  </div>
+  <ul class="list" id="list"></ul>
+  <div class="empty" id="empty" hidden>
+    <div class="sleeve" aria-hidden="true"></div>
+    <h2>Your binder is empty</h2>
+    <p id="emptyText">Tap Add a card and take a photo of the front. The card gets matched to its official set and number, then logged with its rarity, a condition estimate and its price.</p>
+    <button class="btn primary" type="button" id="emptyAdd">Add your first card</button>
+  </div>
+</main>
+
+<button class="fab" id="fab" type="button"><span class="dot" aria-hidden="true"></span>Add a card</button>
+
+<dialog class="sheet" id="addSheet" aria-labelledby="addTitle">
+  <div class="sheet-inner">
+    <div class="sheet-head"><h2 id="addTitle">Add a card</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
+    <div class="sheet-body" id="addBody"></div>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="detailSheet" aria-labelledby="detailTitle">
+  <div class="sheet-inner">
+    <div class="sheet-head"><h2 id="detailTitle">Card</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
+    <div class="sheet-body" id="detailBody"></div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+"use strict";
+
+/* ---------- helpers ---------- */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const usd = n => (typeof n === "number" && isFinite(n)) ? n.toLocaleString("en-US", {style:"currency", currency:"USD"}) : "—";
+const eur = n => (typeof n === "number" && isFinite(n)) ? n.toLocaleString("en-US", {style:"currency", currency:"EUR"}) : "—";
+const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[’'`]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const normNum = s => String(s || "").toUpperCase().replace(/\s+/g, "").replace(/\d+/g, d => String(parseInt(d, 10)));
+const uid = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+const inClaude = !!(window.claude && typeof window.claude.use === "function");
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg;
+  document.body.append(t); setTimeout(() => t.remove(), 2600);
+}
+const ago = ts => {
+  if (!ts) return "";
+  const m = Math.round((Date.now() - ts) / 60000);
+  if (m < 1) return "just now"; if (m < 60) return m + " min ago";
+  const h = Math.round(m / 60); if (h < 36) return h + " h ago";
+  return Math.round(h / 24) + " days ago";
+};
+
+/* ---------- catalogue (official English card list) ---------- */
+const Cat = { ready: false, sets: [], cards: [], rar: [], sup: [], byId: new Map(), version: "" };
+async function loadCatalogue() {
+  const r = await fetch("cards.json");
+  if (!r.ok) throw new Error("catalogue " + r.status);
+  const d = await r.json();
+  Cat.version = d.v; Cat.rar = d.rarities; Cat.sup = d.supertypes;
+  Cat.sets = d.sets.map(s => ({ id: s[0], name: s[1], series: s[2], total: s[3], code: s[4], released: s[5], n: norm(s[1]) }));
+  Cat.cards = d.cards.map(c => {
+    const set = Cat.sets[c[0]];
+    const card = { set, number: c[1], name: c[2], rarity: Cat.rar[c[3]], supertype: Cat.sup[c[4]], id: c[5] || (set.id + "-" + c[1]), im: c[6] };
+    card.n = norm(card.name); card.nn = normNum(card.number);
+    return card;
+  });
+  for (const c of Cat.cards) Cat.byId.set(c.id, c);
+  Cat.ready = true;
+}
+function cardImage(c, large) {
+  if (!c) return "";
+  if (c.im === 0) return `https://images.pokemontcg.io/${c.set.id}/${c.number}${large ? "_hires" : ""}.png`;
+  if (c.im === 1) return `https://images.scrydex.com/pokemon/${c.id}/${large ? "large" : "small"}`;
+  return large ? String(c.im).replace(/\/small$/, "/large").replace(/\.png$/, "_hires.png") : c.im;
+}
+function brief(c) {
+  return { id: c.id, name: c.name, number: c.number, set: c.set.name, setCode: c.set.code, printedTotal: c.set.total, series: c.set.series, released: c.set.released, rarity: c.rarity || "none listed" };
+}
+/* free-text search over the catalogue */
+function searchCatalogue(q, limit = 30) {
+  if (!Cat.ready) return [];
+  const raw = String(q || "").trim();
+  if (!raw) return [];
+  let num = null, total = null; const words = [];
+  for (const tok of raw.split(/\s+/)) {
+    const m = tok.match(/^#?([A-Za-z]{0,5}\d+[A-Za-z]?)\/([A-Za-z]{0,5}\d+)$/);
+    if (m) { num = normNum(m[1]); total = parseInt(m[2].replace(/\D/g, ""), 10); continue; }
+    if (/^#?[A-Za-z]{0,5}\d+[A-Za-z]?$/.test(tok) && /\d/.test(tok) && !/^(ex|gx|v)$/i.test(tok)) { num = normNum(tok.replace("#", "")); continue; }
+    words.push(tok);
+  }
+  const w = norm(words.join(" "));
+  const out = [];
+  for (const c of Cat.cards) {
+    let s = 0;
+    if (num) { if (c.nn !== num) continue; s += 4; if (total && c.set.total === total) s += 3; }
+    if (w) {
+      if (c.n === w) s += 6; else if (c.n.startsWith(w)) s += 4; else if (c.n.includes(w)) s += 3;
+      else if (c.set.n.includes(w) || norm(c.set.code) === w) s += 1.5;
+      else {
+        const parts = w.split(" "); const hay = c.n + " " + c.set.n + " " + norm(c.set.code);
+        if (parts.every(p => hay.includes(p))) s += 2; else continue;
+      }
+    }
+    out.push([s + c.set.released.slice(0, 4) / 10000, c]);
+  }
+  out.sort((a, b) => b[0] - a[0]);
+  return out.slice(0, limit).map(x => x[1]);
+}
+/* score catalogue entries against what was read off the photo */
+function matchRead(read) {
+  if (!Cat.ready || !read) return [];
+  const name = norm(read.name), code = norm(read.setCode), sname = norm(read.setName);
+  let num = null, total = null;
+  const m = String(read.number || "").match(/([A-Za-z]{0,6}\s?\d+[A-Za-z]?)\s*(?:\/\s*([A-Za-z]{0,5}\d+))?/);
+  if (m) { num = normNum(m[1]); if (m[2]) total = parseInt(m[2].replace(/\D/g, ""), 10); }
+  const out = [];
+  for (const c of Cat.cards) {
+    let s = 0;
+    const numHit = num && c.nn === num;
+    const nameHit = name && (c.n === name ? 2 : (c.n.includes(name) || name.includes(c.n)) ? 1 : 0);
+    if (!numHit && !nameHit) continue;
+    if (numHit) s += 5;
+    if (nameHit === 2) s += 5; else if (nameHit === 1) s += 3;
+    if (code && norm(c.set.code) === code) s += 4;
+    if (total && c.set.total === total) s += 3;
+    if (sname && (c.set.n === sname)) s += 4; else if (sname && (c.set.n.includes(sname) || sname.includes(c.set.n))) s += 2;
+    if (s >= 7) out.push([s, c]);
+  }
+  out.sort((a, b) => b[0] - a[0] || (b[1].set.released > a[1].set.released ? 1 : -1));
+  return out.slice(0, 8).map(x => x[1]);
+}
+
+/* ---------- rarity tiers ---------- */
+function tier(r) {
+  const s = String(r || "").toLowerCase();
+  if (!s || s === "common" || s === "uncommon" || s === "promo") return "common";
+  if (/secret|hyper|special illustration|gold|rainbow|shiny ultra|mega hyper|amazing|shining|star|legend/.test(s)) return "secret";
+  if (/ultra|illustration|double|ex|gx|vmax|vstar|\bv\b|radiant|ace|break|prime|lv\.x|prism|trainer gallery|classic|full art/.test(s)) return "ultra";
+  return "rare";
+}
+
+/* ---------- finishes and prices ---------- */
+const FINISHES = [["normal","Normal"],["holofoil","Holofoil"],["reverseHolofoil","Reverse holo"],["1stEditionHolofoil","1st Edition holo"],["1stEditionNormal","1st Edition"],["unlimitedHolofoil","Unlimited holo"]];
+const finishLabel = k => (FINISHES.find(f => f[0] === k) || [k, k ? k.replace(/([A-Z])/g, " $1").replace(/^./, x => x.toUpperCase()) : "Unknown"])[1];
+function canonFinish(k) {
+  const s = String(k || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (s.includes("reverse")) return "reverseHolofoil";
+  if (s.includes("1stedition") || s.includes("firstedition")) return s.includes("holo") ? "1stEditionHolofoil" : "1stEditionNormal";
+  if (s.includes("unlimited")) return s.includes("holo") ? "unlimitedHolofoil" : "normal";
+  if (s.includes("holo")) return "holofoil";
+  if (s === "normal") return "normal";
+  return k;
+}
+function pickPrice(card) {
+  const p = card.price; if (!p || !p.usd) return null;
+  const order = [card.finish, "holofoil", "normal", "reverseHolofoil", ...Object.keys(p.usd)];
+  for (const k of order) { const v = k && p.usd[k]; if (v && typeof v.market === "number") return { finish: k, value: v.market }; }
+  for (const k of order) { const v = k && p.usd[k]; if (v && typeof v.mid === "number") return { finish: k, value: v.mid }; }
+  return null;
+}
+const PriceState = { blocked: false, tried: false, busy: false };
+
+async function getJSON(url, ms = 12000) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms);
+  try { const r = await fetch(url, { signal: ctl.signal }); if (!r.ok) throw Object.assign(new Error("HTTP " + r.status), { status: r.status }); return await r.json(); }
+  finally { clearTimeout(t); }
+}
+function fromPTCG(c) {
+  const usdP = {}; const tp = c.tcgplayer;
+  if (tp && tp.prices) for (const [k, v] of Object.entries(tp.prices)) usdP[canonFinish(k)] = { low: v.low ?? null, mid: v.mid ?? null, high: v.high ?? null, market: v.market ?? null };
+  const cm = c.cardmarket && c.cardmarket.prices;
+  const eurP = cm ? { trend: cm.trendPrice ?? null, avg30: cm.avg30 ?? null, low: cm.lowPrice ?? null, avg: cm.averageSellPrice ?? null, reverseTrend: cm.reverseHoloTrend ?? null } : null;
+  if (!Object.keys(usdP).length && !eurP) return null;
+  return { usd: usdP, eur: eurP, source: "pokemontcg.io (TCGplayer and Cardmarket)", updated: (tp && tp.updatedAt) || (c.cardmarket && c.cardmarket.updatedAt) || "", url: tp && tp.url || "", fetchedAt: Date.now() };
+}
+function fromTCGdex(d) {
+  const pr = d && d.pricing; if (!pr) return null;
+  const usdP = {};
+  if (pr.tcgplayer) for (const [k, v] of Object.entries(pr.tcgplayer)) {
+    if (!v || typeof v !== "object") continue;
+    usdP[canonFinish(k)] = { low: v.lowPrice ?? null, mid: v.midPrice ?? null, high: v.highPrice ?? null, market: v.marketPrice ?? null };
+  }
+  const cm = pr.cardmarket;
+  const eurP = cm ? { trend: cm.trend ?? null, avg30: cm.avg30 ?? null, low: cm.low ?? null, avg: cm.avg ?? null, reverseTrend: cm["trend-holo"] ?? null } : null;
+  if (!Object.keys(usdP).length && !eurP) return null;
+  return { usd: usdP, eur: eurP, source: "TCGdex (TCGplayer and Cardmarket)", updated: (pr.tcgplayer && pr.tcgplayer.updated) || (cm && cm.updated) || "", url: "", fetchedAt: Date.now() };
+}
+async function priceFromTCGdex(card) {
+  const list = await getJSON(`https://api.tcgdex.net/v2/en/cards?name=eq:${encodeURIComponent(card.name)}&localId=eq:${encodeURIComponent(card.number)}`);
+  if (!Array.isArray(list) || !list.length) return null;
+  const want = norm(card.setName);
+  for (const b of list.slice(0, 4)) {
+    const d = await getJSON(`https://api.tcgdex.net/v2/en/cards/${encodeURIComponent(b.id)}`);
+    if (list.length === 1 || norm(d.set && d.set.name) === want) return fromTCGdex(d);
+  }
+  return null;
+}
+/* fetch prices for many cards: batched pokemontcg.io first, TCGdex for the rest */
+async function fetchPrices(cards) {
+  const out = new Map(); const ids = [...new Set(cards.map(c => c.cardId).filter(Boolean))];
+  let reached = false;
+  for (let i = 0; i < ids.length; i += 25) {
+    const chunk = ids.slice(i, i + 25);
+    const q = "(" + chunk.map(id => `id:"${id}"`).join(" OR ") + ")";
+    try {
+      const j = await getJSON(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&select=id,tcgplayer,cardmarket&pageSize=250`);
+      reached = true;
+      for (const c of (j.data || [])) { const p = fromPTCG(c); if (p) out.set(c.id, p); }
+    } catch (e) { /* fall through to TCGdex */ }
+  }
+  for (const card of cards) {
+    if (out.has(card.cardId)) continue;
+    try { const p = await priceFromTCGdex(card); reached = true; if (p) out.set(card.cardId, p); }
+    catch (e) { if (e && e.status) reached = true; }
+  }
+  return { prices: out, reached };
+}
+
+/* ---------- storage: Claude's store when available, else this browser ---------- */
+const Store = {
+  mode: "none", cards: [], listeners: [], db: null, assets: null, uid: null, idb: null, urls: new Map(),
+  onChange(fn) { this.listeners.push(fn); },
+  emit() { for (const f of this.listeners) f(this.cards); },
+  async init() {
+    if (inClaude) {
+      try {
+        const [db, user, assets] = await Promise.all([claude.use("db"), claude.use("user"), claude.use("assets")]);
+        const id = user ? await user.id() : null;
+        if (db && id) {
+          this.db = db; this.assets = assets; this.uid = id; this.mode = "cloud";
+          this.col = db.collection(`data/users/${id}`);
+          return new Promise(resolve => {
+            let done = false; const finish = () => { if (!done) { done = true; resolve(); } };
+            const timer = setTimeout(() => { Notices.show("slow", "Your saved cards are taking a while to load. They'll appear here when the connection catches up."); finish(); }, 10000);
+            this.col.onSnapshot(snap => {
+              this.cards = snap.docs.filter(d => d.id.startsWith("card_")).map(d => ({ ...d.data(), id: d.id }));
+              if (!snap.metadata.fromCache) { clearTimeout(timer); Notices.hide("slow"); }
+              this.emit(); finish();
+            }, err => { clearTimeout(timer); Notices.show("dberr", "Your saved cards couldn't load just now. Reopen the page to try again."); finish(); });
+          });
+        }
+      } catch (e) { /* fall back to local */ }
+    }
+    await this.initLocal();
+  },
+  async initLocal() {
+    try {
+      this.idb = await new Promise((res, rej) => {
+        const r = indexedDB.open("poke-lab", 1);
+        r.onupgradeneeded = () => { r.result.createObjectStore("cards", { keyPath: "id" }); r.result.createObjectStore("photos"); };
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      });
+      this.mode = "local";
+      this.cards = await this.tx("cards", "readonly", s => s.getAll());
+    } catch (e) {
+      this.mode = "memory"; this.cards = [];
+      Notices.show("mem", "This browser isn't letting the page save, so cards you add will be gone when you close it.");
+    }
+    this.emit();
+  },
+  tx(store, mode, fn) {
+    return new Promise((res, rej) => {
+      const t = this.idb.transaction(store, mode); const r = fn(t.objectStore(store));
+      t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error);
+    });
+  },
+  async savePhoto(blob) {
+    if (this.mode === "cloud" && this.assets) {
+      try { const a = await this.assets.upload(blob); return { kind: "asset", id: a.id }; } catch (e) { return null; }
+    }
+    if (this.mode === "local") { const id = uid(); await this.tx("photos", "readwrite", s => s.put(blob, id)); return { kind: "local", id }; }
+    if (this.mode === "memory") { const id = uid(); this.urls.set(id, URL.createObjectURL(blob)); return { kind: "mem", id }; }
+    return null;
+  },
+  async photoURL(card) {
+    const p = card.photo; if (!p) return "";
+    if (p.kind === "asset") return "/_blob/" + p.id;
+    if (this.urls.has(p.id)) return this.urls.get(p.id);
+    if (p.kind === "local" && this.idb) {
+      const blob = await this.tx("photos", "readonly", s => s.get(p.id));
+      if (blob) { const u = URL.createObjectURL(blob); this.urls.set(p.id, u); return u; }
+    }
+    return "";
+  },
+  async put(card) {
+    const clean = JSON.parse(JSON.stringify(card)); const id = clean.id; delete clean.id;
+    if (this.mode === "cloud") { await this.col.doc(id).set(clean); return; }
+    const full = { ...clean, id };
+    const i = this.cards.findIndex(c => c.id === id);
+    if (i >= 0) this.cards[i] = full; else this.cards.push(full);
+    if (this.mode === "local") await this.tx("cards", "readwrite", s => s.put(full));
+    this.emit();
+  },
+  async remove(card) {
+    if (this.mode === "cloud") {
+      await this.col.doc(card.id).delete();
+      if (card.photo && card.photo.kind === "asset" && this.assets) { try { await this.assets.delete(card.photo.id); } catch (e) {} }
+      return;
+    }
+    this.cards = this.cards.filter(c => c.id !== card.id);
+    if (this.mode === "local") {
+      await this.tx("cards", "readwrite", s => s.delete(card.id));
+      if (card.photo && card.photo.kind === "local") await this.tx("photos", "readwrite", s => s.delete(card.photo.id));
+    }
+    this.emit();
+  }
+};
+
+/* ---------- notices ---------- */
+const Notices = {
+  el: null, items: new Map(),
+  show(key, html, dismissable = true) { this.items.set(key, { html, dismissable }); this.render(); },
+  hide(key) { this.items.delete(key); this.render(); },
+  render() {
+    this.el = this.el || $("#notices");
+    this.el.innerHTML = [...this.items].map(([k, v]) => `<div class="notice" data-k="${esc(k)}"><span>${v.html}</span>${v.dismissable ? `<button class="x" type="button" aria-label="Dismiss" data-dismiss="${esc(k)}">×</button>` : ""}</div>`).join("");
+  }
+};
+document.addEventListener("click", e => { const k = e.target.closest("[data-dismiss]"); if (k) Notices.hide(k.dataset.dismiss); });
+
+/* ---------- Claude (photo reading) ---------- */
+const AI = { sample: null, images: false, tools: false, checked: false };
+async function initAI() {
+  if (!inClaude) { AI.checked = true; return; }
+  try {
+    const s = await claude.use("sample");
+    if (s) {
+      const lim = await s.limits().catch(() => null);
+      AI.sample = s; AI.images = !!(lim && lim.images); AI.tools = !!(lim && lim.tools);
+    }
+  } catch (e) {}
+  AI.checked = true;
+}
+function readPrompt(withTools) {
+  return `You're identifying a Pokémon Trading Card Game card from a collector's photo so it can be logged in their catalogue.
+
+Read the card front:
+- the card name exactly as printed (include suffixes like ex, V, VMAX, GX),
+- the collector number at the bottom (for example 136/189, 004/198, TG05/TG30, SWSH050, 4/102),
+- the set code printed beside the regulation mark on newer cards (three letters such as SVI, PAL, OBF, PAR, DLR) if visible,
+- the set (from the set symbol, the code or the copyright year) if you can tell.
+${withTools ? "Then call find_cards with what you read to look up the official catalogue and choose the exact entry. Pick cardId only from find_cards results. If several fit, pick the most likely and lower confidence.\n" : ""}
+Then look at condition, being conservative because a phone photo hides scratches and soft corners:
+- centering: left/right and top/bottom border ratios as they look (e.g. "55/45 L-R, 60/40 T-B"),
+- corners, edges (whitening, chips), surface (scratches, creases, dents, print lines, glare hiding detail),
+- an overall grade estimate on the 1 to 10 scale graders use, and a likely range.
+Also say which finish you see: "normal", "holofoil" (only the picture box shines), "reverseHolofoil" (everything except the picture shines), or "unknown".
+If this isn't a Pokémon TCG card, or it isn't in English, say so in the fields below.
+
+Reply with only this JSON:
+{"isPokemonCard":true,"language":"English","name":"","number":"","setCode":"","setName":"","cardId":null,"confidence":"high|medium|low","finish":"normal","condition":{"grade":8,"range":"7-9","centering":"","corners":"","edges":"","surface":"","notes":""}}`;
+}
+async function identify(blob, onStatus) {
+  const tools = AI.tools ? [{
+    name: "find_cards",
+    description: "Search the official English Pokémon TCG catalogue. Give the card name and/or collector number as printed; optionally the set code or set name. Returns up to 10 matching catalogue entries with their ids.",
+    inputSchema: { type: "object", properties: { name: { type: "string" }, number: { type: "string", description: "collector number as printed, e.g. 136/189" }, setCode: { type: "string" }, setName: { type: "string" } } },
+    execute(input) {
+      onStatus("Checking the catalogue…");
+      const hits = matchRead(input || {});
+      const more = hits.length ? [] : searchCatalogue([input && input.name, input && input.number].filter(Boolean).join(" "), 10);
+      return (hits.length ? hits : more).slice(0, 10).map(brief);
+    }
+  }] : undefined;
+  const ask = (useTools) => AI.sample.json(readPrompt(useTools), { images: blob, tools: useTools ? tools : undefined, modelTier: "default" });
+  try { return await ask(!!tools); }
+  catch (e) { if (tools && e && e.code === "tools_unavailable") return await ask(false); throw e; }
+}
+
+/* ---------- images ---------- */
+async function shrink(file, maxSide) {
+  const bmp = await (window.createImageBitmap ? createImageBitmap(file).catch(() => null) : null);
+  let w, h, src = bmp;
+  if (!bmp) {
+    src = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(file); });
+  }
+  w = src.width; h = src.height;
+  const k = Math.min(1, maxSide / Math.max(w, h));
+  const cv = document.createElement("canvas"); cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+  cv.getContext("2d").drawImage(src, 0, 0, cv.width, cv.height);
+  return await new Promise(res => cv.toBlob(res, "image/jpeg", 0.86));
+}
+function imgTag(src, alt, cls = "") {
+  if (!src) return "";
+  return `<img src="${esc(src)}" alt="${esc(alt)}" loading="lazy" data-fail="remove" ${cls ? `class="${cls}"` : ""}>`;
+}
+
+/* ---------- collection view ---------- */
+const view = { q: "", set: "", rarity: "", sort: "value" };
+const photoCache = new Map();
+function cardFromCatalogue(c) {
+  return { cardId: c.id, name: c.name, number: c.number, setId: c.set.id, setName: c.set.name, setCode: c.set.code, printedTotal: c.set.total, series: c.set.series, released: c.set.released, rarity: c.rarity || "", supertype: c.supertype || "" };
+}
+function renderTotals(cards) {
+  let total = 0, priced = 0, count = 0; const sets = new Set();
+  for (const c of cards) { const q = c.qty || 1; count += q; sets.add(c.setId); const p = pickPrice(c); if (p) { total += p.value * q; priced += q; } }
+  $("#totalValue").textContent = usd(total);
+  const bits = [`${count} card${count === 1 ? "" : "s"}`, `${sets.size} set${sets.size === 1 ? "" : "s"}`];
+  if (count && priced < count) bits.push(`${count - priced} unpriced`);
+  $("#totalMeta").textContent = bits.join(" · ");
+}
+function renderFilters(cards) {
+  const setSel = $("#fSet"), rSel = $("#fRarity");
+  const sets = new Map(); const rars = new Set();
+  for (const c of cards) { sets.set(c.setId, c); if (c.rarity) rars.add(c.rarity); }
+  const keepS = setSel.value, keepR = rSel.value;
+  setSel.innerHTML = `<option value="">All sets</option>` + [...sets.values()].sort((a, b) => String(b.released).localeCompare(String(a.released))).map(c => `<option value="${esc(c.setId)}">${esc(c.setName)}${c.setCode ? " (" + esc(c.setCode) + ")" : ""}</option>`).join("");
+  rSel.innerHTML = `<option value="">All rarities</option>` + [...rars].sort().map(r => `<option>${esc(r)}</option>`).join("");
+  setSel.value = sets.has(keepS) ? keepS : ""; rSel.value = rars.has(keepR) ? keepR : "";
+  view.set = setSel.value; view.rarity = rSel.value;
+}
+async function renderList() {
+  const cards = Store.cards;
+  renderTotals(cards); renderFilters(cards);
+  const has = cards.length > 0;
+  $("#filters").hidden = !has; $("#empty").hidden = has; $("#fab").hidden = !has;
+  const q = norm(view.q);
+  let rows = cards.filter(c => (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) &&
+    (!q || (norm(c.name) + " " + norm(c.setName) + " " + norm(c.setCode) + " " + norm(c.number)).includes(q)));
+  const val = c => (pickPrice(c) || { value: -1 }).value;
+  const cmp = {
+    value: (a, b) => val(b) - val(a),
+    recent: (a, b) => (b.addedAt || 0) - (a.addedAt || 0),
+    set: (a, b) => String(b.released).localeCompare(String(a.released)) || (parseInt(a.number) || 0) - (parseInt(b.number) || 0),
+    name: (a, b) => a.name.localeCompare(b.name)
+  }[view.sort];
+  rows.sort(cmp);
+  const list = $("#list");
+  if (has && !rows.length) { list.innerHTML = `<li class="muted" style="padding:16px 4px">No cards match these filters.</li>`; return; }
+  list.innerHTML = rows.map(c => {
+    const p = pickPrice(c);
+    const g = c.condition && c.condition.grade;
+    return `<li><button class="row" type="button" data-open="${esc(c.id)}">
+      <span class="thumb" data-photo="${esc(c.id)}"></span>
+      <span class="main">
+        <span class="name">${esc(c.name)}${(c.qty || 1) > 1 ? ` <span class="muted">×${c.qty}</span>` : ""}</span>
+        <span class="setline">${esc(c.setName)} · <span class="mono">${esc(c.setCode || c.setId)} ${esc(c.number)}/${esc(c.printedTotal || "?")}</span></span>
+        <span class="chips">${c.rarity ? `<span class="chip t-${tier(c.rarity)}">${esc(c.rarity)}</span>` : ""}${g ? `<span class="chip grade">Est. ${esc(g)}</span>` : ""}</span>
+      </span>
+      <span class="price">${p ? `<b>${usd(p.value)}</b><span>${esc(finishLabel(p.finish))}</span>` : `<b class="muted">—</b><span>No price</span>`}</span>
+    </button></li>`;
+  }).join("");
+  for (const c of rows) {
+    const el = list.querySelector(`[data-photo="${CSS.escape(c.id)}"]`); if (!el) continue;
+    let u = photoCache.get(c.id); if (u === undefined) { u = await Store.photoURL(c); photoCache.set(c.id, u); }
+    const cat = Cat.byId.get(c.cardId);
+    el.innerHTML = imgTag(u || cardImage(cat), c.name);
+  }
+}
+
+/* ---------- prices on open ---------- */
+const STALE = 6 * 3600 * 1000;
+async function refreshPrices(force, only) {
+  if (PriceState.busy) return; PriceState.busy = true;
+  try {
+    const due = (only || Store.cards).filter(c => c.cardId && (force || !c.price || !c.price.fetchedAt || Date.now() - c.price.fetchedAt > STALE));
+    if (!due.length) return;
+    const { prices, reached } = await fetchPrices(due);
+    PriceState.tried = true;
+    if (!reached) {
+      PriceState.blocked = true;
+      Notices.show("prices", inClaude
+        ? "<b>Live prices can't load inside Claude.</b> Pages here can't reach outside websites, so prices load on the hosted copy of this app (no key needed)."
+        : "<b>The price services didn't answer.</b> Prices will try again next time you open the app.");
+      return;
+    }
+    PriceState.blocked = false; Notices.hide("prices");
+    for (const c of due) {
+      const p = prices.get(c.cardId);
+      if (p) await Store.put({ ...c, price: p });
+    }
+  } finally { PriceState.busy = false; }
+}
+
+/* ---------- add flow ---------- */
+const add = { blob: null, photoBlob: null, url: "", read: null, cands: [], chosen: null, finish: "normal", qty: 1, cond: null, step: "pick", err: "", status: "", searchQ: "" };
+function resetAdd() { Object.assign(add, { blob: null, photoBlob: null, url: "", read: null, cands: [], chosen: null, finish: "normal", qty: 1, cond: null, step: "pick", err: "", status: "", searchQ: "" }); }
+function openAdd() { resetAdd(); renderAdd(); $("#addSheet").showModal(); }
+function renderAdd() {
+  const b = $("#addBody");
+  const aiOn = AI.sample && AI.images;
+  if (add.step === "pick") {
+    b.innerHTML = `
+      <p class="muted" style="margin:0">${aiOn ? "Photograph the front of the card, flat and filling most of the frame. Claude reads the name, number and set, then checks condition." : "Add a photo of the front, then find the card by name or number."}</p>
+      <div class="pickers">
+        <label class="picker">Take photo<small>Camera</small><input id="camIn" type="file" accept="image/*" capture="environment"></label>
+        <label class="picker">Choose photo<small>From your library</small><input id="libIn" type="file" accept="image/*"></label>
+      </div>
+      <div><button class="linkbtn" type="button" id="skipPhoto">Add without a photo</button></div>`;
+    const onFile = e => { const f = e.target.files && e.target.files[0]; if (f) takePhoto(f); };
+    $("#camIn").addEventListener("change", onFile); $("#libIn").addEventListener("change", onFile);
+    $("#skipPhoto").addEventListener("click", () => { add.step = "search"; renderAdd(); });
+    return;
+  }
+  const shot = add.url ? `<img src="${esc(add.url)}" alt="Your photo">` : `<div class="ph">No photo</div>`;
+  let statusHtml = "";
+  if (add.step === "reading") statusHtml = `<span class="line"><span class="spinner" aria-hidden="true"></span>${esc(add.status || "Reading the card…")}</span>`;
+  else if (add.read) {
+    const r = add.read;
+    statusHtml = `<span class="line"><b>${esc(r.name || "Unreadable")}</b> <span class="mono">${esc(r.number || "")}</span></span>
+      <span class="read">Read from your photo${r.setCode ? ` · code <span class="mono">${esc(r.setCode)}</span>` : ""}${r.setName ? ` · ${esc(r.setName)}` : ""}${r.confidence ? ` · ${esc(r.confidence)} confidence` : ""}</span>`;
+    if (r.isPokemonCard === false) statusHtml += `<span class="err">This doesn't look like a Pokémon card.</span>`;
+    else if (r.language && !/english/i.test(r.language)) statusHtml += `<span class="err">This looks like a ${esc(r.language)} card. The catalogue lists English cards, so pick the closest English printing.</span>`;
+  } else if (add.photoBlob) statusHtml = `<span class="line">Photo added</span><span class="read">${aiOn ? "" : "Find the card below."}</span>`;
+  if (add.err) statusHtml += `<span class="err">${esc(add.err)}</span>`;
+
+  const candList = add.cands.length ? `<div><p class="section-label">${add.read ? "Best matches" : "Results"}</p><ul class="cands">${add.cands.map(c => `
+      <li><button class="cand" type="button" data-cand="${esc(c.id)}" aria-pressed="${add.chosen && add.chosen.id === c.id}">
+        <span class="thumb">${imgTag(cardImage(c), c.name)}</span>
+        <span class="t"><b>${esc(c.name)}</b><span>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.rarity || "No rarity listed")}</span></span>
+        <span class="tick" aria-hidden="true"></span></button></li>`).join("")}</ul></div>` : (add.read && add.step !== "reading" ? `<p class="muted" style="margin:0">No catalogue match for that reading. Search below.</p>` : "");
+
+  const showSearch = add.step === "search" || (add.step === "review" && (!add.read || !add.cands.length || add.showSearch));
+  const searchHtml = add.step === "reading" ? "" : (showSearch
+    ? `<div class="field"><label for="catQ">Find the card</label><input id="catQ" type="search" placeholder="e.g. Charizard 4/102 or Pikachu Surging Sparks" value="${esc(add.searchQ)}" autocomplete="off"></div>`
+    : `<div><button class="linkbtn" type="button" id="showSearch">Not right? Search the catalogue</button></div>`);
+
+  let condHtml = "";
+  if (add.chosen) {
+    const c = add.cond || {};
+    const manual = !add.cond || add.cond.source === "manual";
+    condHtml = `
+      <div class="grid2">
+        <div class="field"><label for="finSel">Finish</label><select id="finSel">${FINISHES.map(([k, l]) => `<option value="${k}" ${k === add.finish ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+        <div class="field"><label for="qtyIn">Copies</label><div class="qty"><button type="button" data-q="-1" aria-label="One fewer">−</button><input id="qtyIn" type="number" min="1" max="999" value="${add.qty}"><button type="button" data-q="1" aria-label="One more">+</button></div></div>
+      </div>
+      ${manual ? `<div class="field"><label for="condSel">Condition (your call)</label><select id="condSel">
+        ${[["", "Not set"], ["9", "Near Mint, looks perfect (about 9)"], ["8", "Near Mint, tiny flaw (about 8)"], ["6", "Lightly played (about 6)"], ["4", "Moderately played (about 4)"], ["2", "Heavily played or damaged (about 2)"]].map(([v, l]) => `<option value="${v}" ${String(c.grade || "") === v ? "selected" : ""}>${l}</option>`).join("")}
+      </select></div>` : slabHtml(add.cond)}
+      <button class="btn primary" type="button" id="saveCard">Add to collection</button>`;
+  }
+  b.innerHTML = `<div class="shot">${shot}<div class="status" aria-live="polite">${statusHtml}</div></div>${candList}${searchHtml}${condHtml}`;
+
+  const qEl = $("#catQ");
+  if (qEl) {
+    qEl.addEventListener("input", () => { add.searchQ = qEl.value; add.cands = searchCatalogue(qEl.value, 20); renderCands(); });
+    if (add.step === "search" && !add.cands.length) qEl.focus();
+  }
+  const ss = $("#showSearch"); if (ss) ss.addEventListener("click", () => { add.showSearch = true; renderAdd(); $("#catQ") && $("#catQ").focus(); });
+  b.querySelectorAll("[data-cand]").forEach(el => el.addEventListener("click", () => { add.chosen = Cat.byId.get(el.dataset.cand); renderAdd(); }));
+  const fs = $("#finSel"); if (fs) fs.addEventListener("change", () => add.finish = fs.value);
+  const qi = $("#qtyIn"); if (qi) qi.addEventListener("change", () => add.qty = Math.max(1, Math.min(999, parseInt(qi.value) || 1)));
+  b.querySelectorAll("[data-q]").forEach(el => el.addEventListener("click", () => { add.qty = Math.max(1, Math.min(999, add.qty + parseInt(el.dataset.q))); $("#qtyIn").value = add.qty; }));
+  const cs = $("#condSel"); if (cs) cs.addEventListener("change", () => { add.cond = cs.value ? { grade: Number(cs.value), source: "manual" } : null; });
+  const sv = $("#saveCard"); if (sv) sv.addEventListener("click", saveAdd);
+}
+function renderCands() {
+  /* re-render only the results part while typing, keeping focus in the search box */
+  const qEl = $("#catQ"); const pos = qEl ? qEl.selectionStart : 0;
+  renderAdd();
+  const q2 = $("#catQ"); if (q2) { q2.focus(); try { q2.setSelectionRange(pos, pos); } catch (e) {} }
+}
+async function takePhoto(file) {
+  add.err = "";
+  try {
+    add.photoBlob = await shrink(file, 1200);
+    add.blob = await shrink(file, 1600);
+  } catch (e) { add.err = "That photo couldn't be opened. Try a JPEG or PNG."; add.step = "pick"; renderAdd(); return; }
+  add.url = URL.createObjectURL(add.photoBlob);
+  if (AI.sample && AI.images) {
+    add.step = "reading"; add.status = "Reading the card…"; renderAdd();
+    try {
+      const r = await identify(add.blob, s => { add.status = s; if (add.step === "reading") renderAdd(); });
+      add.read = r && typeof r === "object" ? r : null;
+      if (add.read) {
+        const local = matchRead(add.read);
+        const pick = add.read.cardId && Cat.byId.get(add.read.cardId);
+        add.cands = pick ? [pick, ...local.filter(c => c.id !== pick.id)] : local;
+        add.chosen = add.cands[0] || null;
+        const f = canonFinish(add.read.finish); if (f && f !== "unknown" && FINISHES.some(x => x[0] === f)) add.finish = f;
+        const cnd = add.read.condition;
+        if (cnd && cnd.grade != null) add.cond = { ...cnd, grade: Number(cnd.grade), source: "photo" };
+      }
+    } catch (e) {
+      const code = e && e.code;
+      add.err = code === "not_granted" ? "Photo reading is off for this page, so find the card by name or number below."
+        : code === "rate_limited" ? "Too many reads at once. Wait a moment, or search below."
+        : code === "image_rejected" ? "Claude couldn't use that photo. Try a clearer one, or search below."
+        : "The photo couldn't be read just now. Search below, or try another photo.";
+      if (code === "not_granted") AI.images = false;
+    }
+    add.step = "review"; renderAdd();
+  } else { add.step = "search"; renderAdd(); }
+}
+async function saveAdd() {
+  const c = add.chosen; if (!c) return;
+  const btn = $("#saveCard"); btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const photo = add.photoBlob ? await Store.savePhoto(add.photoBlob) : null;
+    const rec = { id: "card_" + uid(), ...cardFromCatalogue(c), finish: add.finish, qty: add.qty, condition: add.cond || null, photo, read: add.read ? { name: add.read.name || "", number: add.read.number || "", setCode: add.read.setCode || "", confidence: add.read.confidence || "" } : null, addedAt: Date.now(), price: null };
+    await Store.put(rec);
+    $("#addSheet").close();
+    toast(`Added ${c.name}`);
+    refreshPrices(false, [rec]).catch(() => {});
+  } catch (e) {
+    btn.disabled = false; btn.textContent = "Add to collection";
+    add.err = e && e.code === "quota_exceeded" ? "Your collection store is full." : "That card couldn't be saved. Try again."; renderAdd();
+  }
+}
+function slabHtml(cond) {
+  if (!cond || cond.grade == null) return "";
+  const src = cond.source === "photo" ? "From your photo" : "Your own call";
+  return `<div class="slab">
+    <div class="slab-top"><div><div class="k">Condition estimate</div><div style="font-weight:600">${esc(src)}</div></div>
+      <div class="g">${esc(cond.grade)}<small>${cond.range ? "likely " + esc(cond.range) : "of 10"}</small></div></div>
+    ${cond.source === "photo" ? `<dl>
+      ${cond.centering ? `<dt>Centering</dt><dd>${esc(cond.centering)}</dd>` : ""}
+      ${cond.corners ? `<dt>Corners</dt><dd>${esc(cond.corners)}</dd>` : ""}
+      ${cond.edges ? `<dt>Edges</dt><dd>${esc(cond.edges)}</dd>` : ""}
+      ${cond.surface ? `<dt>Surface</dt><dd>${esc(cond.surface)}</dd>` : ""}
+      ${cond.notes ? `<dt>Notes</dt><dd>${esc(cond.notes)}</dd>` : ""}
+    </dl>` : ""}
+    <div class="disclaim">A rough guess on the 1 to 10 grading scale, not a PSA or CGC grade. Photos hide surface scratches and soft corners.</div>
+  </div>`;
+}
+
+/* ---------- detail ---------- */
+let detailId = null, confirmDelete = false;
+async function openDetail(id) { detailId = id; confirmDelete = false; await renderDetail(); $("#detailSheet").showModal(); }
+async function renderDetail() {
+  const c = Store.cards.find(x => x.id === detailId); const b = $("#detailBody");
+  if (!c) { $("#detailSheet").open && $("#detailSheet").close(); return; }
+  $("#detailTitle").textContent = c.name;
+  const photo = await Store.photoURL(c); const cat = Cat.byId.get(c.cardId);
+  const p = c.price; const mine = pickPrice(c);
+  const usdRows = p && p.usd ? Object.entries(p.usd).map(([k, v]) => `<tr class="${k === (mine && mine.finish) ? "mine" : ""}"><td>${esc(finishLabel(k))}</td><td>${usd(v.market)}</td><td>${usd(v.low)}</td><td>${usd(v.mid)}</td><td>${usd(v.high)}</td></tr>`).join("") : "";
+  const eurRow = p && p.eur ? `<p class="src" style="margin:8px 0 0">Cardmarket (Europe): trend ${eur(p.eur.trend)} · 30-day average ${eur(p.eur.avg30)} · low ${eur(p.eur.low)}</p>` : "";
+  let priceHtml;
+  if (usdRows) priceHtml = `<div class="tbl-wrap"><table><thead><tr><th>TCGplayer</th><th>Market</th><th>Low</th><th>Mid</th><th>High</th></tr></thead><tbody>${usdRows}</tbody></table></div>${eurRow}
+      <p class="src" style="margin:8px 0 0">From ${esc(p.source)}${p.updated ? `, prices dated ${esc(String(p.updated).slice(0, 10))}` : ""}. Checked ${esc(ago(p.fetchedAt))}.</p>`;
+  else if (p && p.eur) priceHtml = eurRow + `<p class="src">From ${esc(p.source)}. Checked ${esc(ago(p.fetchedAt))}.</p>`;
+  else priceHtml = `<p class="muted" style="margin:0">${PriceState.blocked && inClaude ? "Live prices load on the hosted copy of this app. Inside Claude, pages can't reach the price services." : PriceState.tried ? "No price listed for this card yet." : "Checking prices…"}</p>`;
+  const searchName = `${c.name} ${c.number}/${c.printedTotal || ""} ${c.setName}`;
+  const ebay = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(searchName + " PSA")}&LH_Sold=1&LH_Complete=1`;
+  const tcgp = (p && p.url) || `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(c.name + " " + c.number)}`;
+
+  b.innerHTML = `
+    <div class="detail-hero">
+      <figure>${photo ? `<img src="${esc(photo)}" alt="Your photo of ${esc(c.name)}">` : `<div class="ph">No photo</div>`}<figcaption>Your photo</figcaption></figure>
+      <figure>${cat ? `<img src="${esc(cardImage(cat, true))}" alt="Catalogue image of ${esc(c.name)}" data-fail="ph">` : `<div class="ph">No catalogue image</div>`}<figcaption>Catalogue</figcaption></figure>
+    </div>
+    <div class="facts">
+      <div class="fact"><div class="k">Set</div><div class="v">${esc(c.setName)}</div><div class="muted" style="font-size:12px">${esc(c.series || "")} · ${esc(String(c.released || "").slice(0, 4))}</div></div>
+      <div class="fact"><div class="k">Number</div><div class="v mono">${esc(c.setCode || c.setId)} ${esc(c.number)}/${esc(c.printedTotal || "?")}</div><div class="muted" style="font-size:12px">ID ${esc(c.cardId)}</div></div>
+      <div class="fact"><div class="k">Rarity</div><div class="v">${c.rarity ? `<span class="chip t-${tier(c.rarity)}">${esc(c.rarity)}</span>` : "Not listed"}</div></div>
+      <div class="fact"><div class="k">Value each</div><div class="v num">${mine ? usd(mine.value) : "—"}</div><div class="muted" style="font-size:12px">${mine ? "TCGplayer market, " + esc(finishLabel(mine.finish)) : "No price yet"}</div></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label for="dFin">Finish</label><select id="dFin">${FINISHES.map(([k, l]) => `<option value="${k}" ${k === c.finish ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div class="field"><label for="dQty">Copies</label><input id="dQty" type="number" min="1" max="999" value="${c.qty || 1}"></div>
+    </div>
+    ${slabHtml(c.condition) || `<p class="muted" style="margin:0">No condition estimate for this card.</p>`}
+    <div><p class="section-label">Prices</p>${priceHtml}</div>
+    <div class="actions">
+      <button class="btn small" type="button" id="dRefresh">Refresh price</button>
+      <a class="btn small ghost" href="${esc(tcgp)}" target="_blank" rel="noopener">TCGplayer</a>
+      <a class="btn small ghost" href="${esc(ebay)}" target="_blank" rel="noopener">Graded sold listings</a>
+    </div>
+    <p class="src" style="margin:0">No free source tracks graded sales, so the last link opens eBay's sold PSA listings for this card.</p>
+    ${confirmDelete ? `<div class="confirm"><b>Remove ${esc(c.name)} from your collection?</b><span class="muted">This deletes its photo too.</span><div class="actions"><button class="btn danger small" type="button" id="dDelYes">Remove card</button><button class="btn small" type="button" id="dDelNo">Keep it</button></div></div>`
+      : `<div><button class="btn danger small" type="button" id="dDel">Remove from collection</button></div>`}`;
+  $("#dFin").addEventListener("change", e => Store.put({ ...c, finish: e.target.value }).then(renderDetail));
+  $("#dQty").addEventListener("change", e => Store.put({ ...c, qty: Math.max(1, Math.min(999, parseInt(e.target.value) || 1)) }).then(renderDetail));
+  $("#dRefresh").addEventListener("click", async e => { e.target.disabled = true; e.target.textContent = "Checking…"; await refreshPrices(true, [c]).catch(() => {}); renderDetail(); });
+  const del = $("#dDel"); if (del) del.addEventListener("click", () => { confirmDelete = true; renderDetail(); });
+  const yes = $("#dDelYes"); if (yes) yes.addEventListener("click", async () => { const name = c.name; await Store.remove(c); photoCache.delete(c.id); $("#detailSheet").close(); toast(`Removed ${name}`); });
+  const no = $("#dDelNo"); if (no) no.addEventListener("click", () => { confirmDelete = false; renderDetail(); });
+}
+
+/* ---------- wiring ---------- */
+document.addEventListener("error", e => {
+  const im = e.target; if (!im || im.tagName !== "IMG" || !im.dataset.fail) return;
+  if (im.dataset.fail === "ph") { const d = document.createElement("div"); d.className = "ph"; d.textContent = inClaude ? "Catalogue image shows on the hosted copy" : "Catalogue image unavailable"; im.replaceWith(d); }
+  else im.remove();
+}, true);
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => b.closest("dialog").close()));
+$("#fab").addEventListener("click", openAdd); $("#emptyAdd").addEventListener("click", openAdd);
+$("#list").addEventListener("click", e => { const r = e.target.closest("[data-open]"); if (r) openDetail(r.dataset.open); });
+$("#q").addEventListener("input", e => { view.q = e.target.value; renderList(); });
+$("#fSet").addEventListener("change", e => { view.set = e.target.value; renderList(); });
+$("#fRarity").addEventListener("change", e => { view.rarity = e.target.value; renderList(); });
+$("#fSort").addEventListener("change", e => { view.sort = e.target.value; try { localStorage.setItem("pokelab-sort", view.sort); } catch (x) {} renderList(); });
+try { const s = localStorage.getItem("pokelab-sort"); if (s) { view.sort = s; $("#fSort").value = s; } } catch (x) {}
+Store.onChange(() => { renderList(); if ($("#detailSheet").open) renderDetail(); });
+
+(async function boot() {
+  $("#filters").hidden = true; $("#empty").hidden = false;
+  const cat = loadCatalogue().catch(() => Notices.show("cat", "The card catalogue didn't load, so new cards can't be matched. Reopen the page to try again.", false));
+  await Promise.all([Store.init(), initAI(), cat]);
+  $("#modeLine").textContent = `${Cat.cards.length.toLocaleString()} English cards · ${Cat.sets.length} sets` + (Store.mode === "cloud" ? " · saved to your Claude account" : Store.mode === "local" ? " · saved in this browser" : "");
+  if (!(AI.sample && AI.images)) $("#emptyText").textContent = "Tap Add a card, add a photo of the front, then find it by name or number. It's logged with its official set, number, rarity and price.";
+  renderList();
+  refreshPrices(false).catch(() => {});
+})();
+})();
+</script>
+
+<script>if("serviceWorker" in navigator&&location.protocol==="https:"){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script>
+</body>
+</html>
