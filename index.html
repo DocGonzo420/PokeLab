@@ -443,7 +443,17 @@ function fromTCGdex(d) {
   if (!Object.keys(usdP).length && !eurP) return null;
   return { usd: usdP, eur: eurP, source: "TCGdex (TCGplayer and Cardmarket)", updated: (pr.tcgplayer && pr.tcgplayer.updated) || (cm && cm.updated) || "", url: "", fetchedAt: Date.now() };
 }
+/* TCGdex updates daily, so it goes first. Its ids match the official ones for older
+   sets (base1-4) but not newer ones (sv08 vs sv8), so a direct hit must match name
+   and number, otherwise look the card up by name and number. */
 async function priceFromTCGdex(card) {
+  const sameNum = d => normNum(d && d.localId) === normNum(card.number);
+  if (card.cardId) {
+    try {
+      const d = await getJSON(`https://api.tcgdex.net/v2/en/cards/${encodeURIComponent(card.cardId)}`);
+      if (d && norm(d.name) === norm(card.name) && sameNum(d)) return fromTCGdex(d);
+    } catch (e) { if (!e || !e.status) throw e; }
+  }
   const list = await getJSON(`https://api.tcgdex.net/v2/en/cards?name=eq:${encodeURIComponent(card.name)}&localId=eq:${encodeURIComponent(card.number)}`);
   if (!Array.isArray(list) || !list.length) return null;
   const want = norm(card.setName);
@@ -453,23 +463,34 @@ async function priceFromTCGdex(card) {
   }
   return null;
 }
-/* fetch prices for many cards: batched pokemontcg.io first, TCGdex for the rest */
+const hasUsd = p => p && p.usd && Object.keys(p.usd).length;
+/* fetch prices for many cards: TCGdex first (updated daily), then batched pokemontcg.io for the rest */
 async function fetchPrices(cards) {
-  const out = new Map(); const ids = [...new Set(cards.map(c => c.cardId).filter(Boolean))];
-  let reached = false;
-  for (let i = 0; i < ids.length; i += 25) {
-    const chunk = ids.slice(i, i + 25);
+  const out = new Map(); let reached = false;
+  const uniq = [...new Map(cards.filter(c => c.cardId).map(c => [c.cardId, c])).values()];
+  let next = 0;
+  const worker = async () => {
+    while (next < uniq.length) {
+      const card = uniq[next++];
+      try { const p = await priceFromTCGdex(card); reached = true; if (p) out.set(card.cardId, p); }
+      catch (e) { if (e && e.status) reached = true; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, uniq.length) }, worker));
+  const rest = uniq.map(c => c.cardId).filter(id => !hasUsd(out.get(id)));
+  for (let i = 0; i < rest.length; i += 25) {
+    const chunk = rest.slice(i, i + 25);
     const q = "(" + chunk.map(id => `id:"${id}"`).join(" OR ") + ")";
     try {
       const j = await getJSON(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&select=id,tcgplayer,cardmarket&pageSize=250`);
       reached = true;
-      for (const c of (j.data || [])) { const p = fromPTCG(c); if (p) out.set(c.id, p); }
-    } catch (e) { /* fall through to TCGdex */ }
-  }
-  for (const card of cards) {
-    if (out.has(card.cardId)) continue;
-    try { const p = await priceFromTCGdex(card); reached = true; if (p) out.set(card.cardId, p); }
-    catch (e) { if (e && e.status) reached = true; }
+      for (const c of (j.data || [])) {
+        const p = fromPTCG(c); if (!p) continue;
+        const have = out.get(c.id);
+        if (!have) out.set(c.id, p);
+        else if (!hasUsd(have) && hasUsd(p)) out.set(c.id, { ...have, usd: p.usd, source: "TCGdex (Cardmarket) and pokemontcg.io (TCGplayer)" });
+      }
+    } catch (e) { /* keep what TCGdex gave */ }
   }
   return { prices: out, reached };
 }

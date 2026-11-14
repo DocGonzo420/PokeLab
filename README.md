@@ -7,7 +7,7 @@ Live site: https://docgonzo420.github.io/PokeLab/
 ## Where the data comes from
 
 - **Card catalogue:** `cards.json`, built from [PokemonTCG/pokemon-tcg-data](https://github.com/PokemonTCG/pokemon-tcg-data) (English sets through Delta Reign, Nov 2026). Rebuild with `python3 tools/build_index.py <path-to-that-repo> cards.json`. `tools/wrap.py` turns the Claude version of the page into this site's `index.html`.
-- **Prices:** TCGplayer and Cardmarket prices from the free [Pokemon TCG API](https://pokemontcg.io) (no key), with [TCGdex](https://tcgdex.dev) as a fallback. Refreshed when you open the app if older than 6 hours.
+- **Prices:** TCGplayer and Cardmarket prices from the free [TCGdex](https://tcgdex.dev) API, updated daily (no key), with the [Pokemon TCG API](https://pokemontcg.io) as a fallback. Refreshed when you open the app if older than 6 hours.
 - **Finding a card from a photo:** this site reads the collector number (and any card names) off your photo with [Tesseract.js](https://github.com/naptha/tesseract.js), which runs in your browser, then matches it to the catalogue. Inside Claude, Claude reads the photo instead.
 - **Condition:** measure centering by dragging guides over your photo (limits follow PSA's front-centering standards), and pick the overall condition yourself. Inside Claude, Claude also estimates corners, edges and surface. Either way it's an estimate, not a PSA or CGC grade.
 
