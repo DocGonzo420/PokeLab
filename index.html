@@ -198,7 +198,7 @@ tr.mine td{background:var(--sunk);font-weight:600}
 .key-outer{color:var(--accent);font-weight:600}.key-inner{color:var(--focus);font-weight:600}
 
 /* Tabs */
-.tabs{display:flex;gap:4px;padding-top:2px;padding-bottom:0}
+.top .tabs{display:flex;justify-content:flex-start;align-items:stretch;flex-wrap:nowrap;gap:4px;padding-block:2px 0}
 .tab{flex:0 0 auto;height:40px;padding:0 14px;border:0;border-bottom:3px solid transparent;background:none;cursor:pointer;font:700 15px/1 var(--f-display);font-stretch:90%;letter-spacing:.02em;color:var(--muted)}
 .tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 body[data-tab="gallery"] .wrap{max-width:1200px}
@@ -1613,7 +1613,7 @@ async function renderDeckEditor(host, deck) {
     </div>
     <div class="meter">
       <div class="fact"><div class="k">Cards</div><div class="v ${an.total === 60 ? "ok" : "warnc"}">${an.total}/60</div></div>
-      <div class="fact"><div class="k">Pokémon · Trainer · Energy</div><div class="v">${an.pokemon}·${an.trainers}·${an.energy}</div></div>
+      <div class="fact"><div class="k">Card mix</div><div class="v">${an.pokemon}·${an.trainers}·${an.energy}</div><div class="muted" style="font-size:12px">Pokémon · Trainer · Energy</div></div>
       <div class="fact"><div class="k">Deck value</div><div class="v">${usd(deckValue)}</div>${unpriced ? `<div class="muted" style="font-size:12px">${unpriced} unpriced</div>` : ""}</div>
       <div class="fact"><div class="k">To buy</div><div class="v">${usd(toBuy)}</div><div class="muted" style="font-size:12px">cards you don't own</div></div>
     </div>
