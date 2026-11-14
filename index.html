@@ -182,6 +182,20 @@ tr.mine td{background:var(--sunk);font-weight:600}
 .confirm{padding:12px;border:1px solid var(--accent);border-radius:10px;display:flex;flex-direction:column;gap:10px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;max-width:calc(100% - 32px)}
 .err{color:var(--accent);font-size:13px}
+/* Centering tool */
+.cen-stage{position:relative;width:fit-content;max-width:100%;margin:0 auto;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:8px;overflow:hidden;background:var(--sunk)}
+.cen-stage img{display:block;max-width:100%;max-height:60vh;max-height:60dvh;width:auto;height:auto;pointer-events:none}
+.cen-line{position:absolute;z-index:1;outline-offset:-4px}
+.cen-line.v{top:0;bottom:0;width:30px;margin-left:-15px;cursor:ew-resize}
+.cen-line.h{left:0;right:0;height:30px;margin-top:-15px;cursor:ns-resize}
+.cen-line::after{content:"";position:absolute;background:var(--c);box-shadow:0 0 0 1px rgb(255 255 255 / .55)}
+.cen-line.v::after{left:14px;top:0;bottom:0;width:2px}
+.cen-line.h::after{top:14px;left:0;right:0;height:2px}
+.cen-line.outer{--c:var(--accent)}
+.cen-line.inner{--c:var(--focus)}
+.cen-read{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.cen-read .fact .v{font:700 20px/1.1 var(--f-display);font-stretch:85%;font-variant-numeric:tabular-nums}
+.key-outer{color:var(--accent);font-weight:600}.key-inner{color:var(--focus);font-weight:600}
 </style>
 
 </head>
@@ -338,6 +352,40 @@ function matchRead(read) {
   }
   out.sort((a, b) => b[0] - a[0] || (b[1].set.released > a[1].set.released ? 1 : -1));
   return out.slice(0, 8).map(x => x[1]);
+}
+
+/* match the text a reader pulled off the photo (collector number first, then names) */
+function matchOCR(text) {
+  if (!Cat.ready || !text) return { cands: [], number: "" };
+  const t = String(text).replace(/[|\\]/g, "/");
+  const fix = d => d.replace(/[Oo]/g, "0").replace(/[Il]/g, "1");
+  const re = /(?:\b|(?<=[A-Z]))(TG|GG|SV|RC|SH|H)?([0-9OoIl]{1,3}[a-z]?)\s*\/\s*(?:TG|GG|SV|RC|SH|H)?\s?([0-9OoIl]{2,3})\b/g;
+  const found = []; let m;
+  while ((m = re.exec(t))) {
+    if (!/\d/.test(m[2] + m[3])) continue;
+    const total = parseInt(fix(m[3]), 10), raw = m[0].replace(/\s+/g, "");
+    if (m[1]) found.push({ num: normNum(m[1] + fix(m[2])), total, raw });
+    found.push({ num: normNum(fix(m[2])), total, raw });
+  }
+  const promo = /\b(SWSH|SVP|SM|XY|BW|HGSS|DP|SV|TG|GG)\s?([0-9OoIl]{2,3})\b/g;
+  while ((m = promo.exec(t))) found.push({ num: normNum(m[1] + fix(m[2])), total: null, raw: m[0].replace(/\s+/g, "") });
+  const upper = " " + t.toUpperCase().replace(/[^A-Z0-9]+/g, " ") + " ";
+  const nt = " " + norm(t) + " ";
+  const score = new Map();
+  const bump = (c, s) => { if (s > (score.get(c) || 0)) score.set(c, s); };
+  for (const f of found) for (const c of Cat.cards) {
+    if (c.nn !== f.num) continue;
+    let s = 5;
+    if (f.total && c.set.total === f.total) s += 3;
+    if (c.n.length >= 3 && nt.includes(" " + c.n + " ")) s += 6;
+    if (c.set.code && new RegExp("\\b" + c.set.code + "(?=[A-Z0-9 ])").test(upper)) s += 3;
+    bump(c, s);
+  }
+  if (!score.size) for (const c of Cat.cards) {
+    if (c.n.length >= 4 && nt.includes(" " + c.n + " ")) bump(c, 3 + c.n.length / 100 + (c.set.code && upper.includes(" " + c.set.code + " ") ? 3 : 0));
+  }
+  const cands = [...score].sort((a, b) => b[1] - a[1] || (b[0].set.released > a[0].set.released ? 1 : -1)).slice(0, 8).map(x => x[0]);
+  return { cands, number: found.length ? found[0].raw : "" };
 }
 
 /* ---------- rarity tiers ---------- */
@@ -541,6 +589,31 @@ async function initAI() {
   } catch (e) {}
   AI.checked = true;
 }
+/* free text reader for the hosted site (Claude reads photos inside Claude instead) */
+const OCR = { worker: null, loading: null };
+function ocrUsable() { return !inClaude && typeof Worker !== "undefined"; }
+function ocrWorker(onStatus) {
+  if (OCR.worker) return Promise.resolve(OCR.worker);
+  if (!OCR.loading) OCR.loading = (async () => {
+    onStatus && onStatus("Loading the text reader (first time only)…");
+    if (!window.Tesseract) await new Promise((res, rej) => {
+      const sc = document.createElement("script");
+      sc.src = "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js";
+      sc.onload = res; sc.onerror = () => rej(new Error("reader script"));
+      document.head.append(sc);
+    });
+    OCR.worker = await window.Tesseract.createWorker("eng");
+    return OCR.worker;
+  })().catch(e => { OCR.loading = null; throw e; });
+  return OCR.loading;
+}
+async function readByOCR(blob, onStatus) {
+  const w = await ocrWorker(onStatus);
+  onStatus && onStatus("Reading the card number…");
+  const r = await w.recognize(blob);
+  return (r && r.data && r.data.text) || "";
+}
+
 function readPrompt(withTools) {
   return `You're identifying a Pokémon Trading Card Game card from a collector's photo so it can be logged in their catalogue.
 
@@ -683,15 +756,25 @@ async function refreshPrices(force, only) {
 }
 
 /* ---------- add flow ---------- */
-const add = { blob: null, photoBlob: null, url: "", read: null, cands: [], chosen: null, finish: "normal", qty: 1, cond: null, step: "pick", err: "", status: "", searchQ: "" };
-function resetAdd() { Object.assign(add, { blob: null, photoBlob: null, url: "", read: null, cands: [], chosen: null, finish: "normal", qty: 1, cond: null, step: "pick", err: "", status: "", searchQ: "" }); }
+const add = {};
+function resetAdd() { Object.assign(add, { blob: null, photoBlob: null, url: "", read: null, ocr: null, cands: [], chosen: null, finish: "normal", qty: 1, cond: null, step: "pick", prevStep: "review", err: "", status: "", searchQ: "", showSearch: false, cenBox: null }); }
+resetAdd();
+const CONDS = [["", "Not set"], ["9", "Near Mint, looks perfect (about 9)"], ["8", "Near Mint, tiny flaw (about 8)"], ["6", "Lightly played (about 6)"], ["4", "Moderately played (about 4)"], ["2", "Heavily played or damaged (about 2)"]];
+const condOptions = g => CONDS.map(([v, l]) => `<option value="${v}" ${String(g ?? "") === v ? "selected" : ""}>${l}</option>`).join("");
 function openAdd() { resetAdd(); renderAdd(); $("#addSheet").showModal(); }
 function renderAdd() {
   const b = $("#addBody");
   const aiOn = AI.sample && AI.images;
+  if (add.step === "centering") {
+    centeringEditor(b, add.url, add.cenBox, res => {
+      if (res) { add.cenBox = res.box; add.cond = { ...(add.cond || { source: "manual" }), centering: res.text, centeringCap: res.cap, centeringMeasured: true }; }
+      add.step = add.prevStep || "review"; renderAdd();
+    });
+    return;
+  }
   if (add.step === "pick") {
     b.innerHTML = `
-      <p class="muted" style="margin:0">${aiOn ? "Photograph the front of the card, flat and filling most of the frame. Claude reads the name, number and set, then checks condition." : "Add a photo of the front, then find the card by name or number."}</p>
+      <p class="muted" style="margin:0">${aiOn ? "Photograph the front of the card, flat and filling most of the frame. Claude reads the name, number and set, then checks condition." : ocrUsable() ? "Photograph the front of the card, flat, straight on and filling most of the frame. The app reads the collector number at the bottom to find it." : "Add a photo of the front, then find the card by name or number."}</p>
       <div class="pickers">
         <label class="picker">Take photo<small>Camera</small><input id="camIn" type="file" accept="image/*" capture="environment"></label>
         <label class="picker">Choose photo<small>From your library</small><input id="libIn" type="file" accept="image/*"></label>
@@ -711,16 +794,20 @@ function renderAdd() {
       <span class="read">Read from your photo${r.setCode ? ` · code <span class="mono">${esc(r.setCode)}</span>` : ""}${r.setName ? ` · ${esc(r.setName)}` : ""}${r.confidence ? ` · ${esc(r.confidence)} confidence` : ""}</span>`;
     if (r.isPokemonCard === false) statusHtml += `<span class="err">This doesn't look like a Pokémon card.</span>`;
     else if (r.language && !/english/i.test(r.language)) statusHtml += `<span class="err">This looks like a ${esc(r.language)} card. The catalogue lists English cards, so pick the closest English printing.</span>`;
+  } else if (add.ocr) {
+    statusHtml = add.ocr.number
+      ? `<span class="line">Read <span class="mono">${esc(add.ocr.number)}</span> from your photo</span><span class="read">${add.cands.length ? "Check it's the right card." : "No card has that number. Search below."}</span>`
+      : `<span class="line">Couldn't read the number</span><span class="read">${add.cands.length ? "These names showed up in the photo." : "Search below, or try a sharper, closer photo."}</span>`;
   } else if (add.photoBlob) statusHtml = `<span class="line">Photo added</span><span class="read">${aiOn ? "" : "Find the card below."}</span>`;
   if (add.err) statusHtml += `<span class="err">${esc(add.err)}</span>`;
 
-  const candList = add.cands.length ? `<div><p class="section-label">${add.read ? "Best matches" : "Results"}</p><ul class="cands">${add.cands.map(c => `
+  const candList = add.cands.length ? `<div><p class="section-label">${add.read || (add.ocr && !add.searchQ) ? "Best matches" : "Results"}</p><ul class="cands">${add.cands.map(c => `
       <li><button class="cand" type="button" data-cand="${esc(c.id)}" aria-pressed="${add.chosen && add.chosen.id === c.id}">
         <span class="thumb">${imgTag(cardImage(c), c.name)}</span>
         <span class="t"><b>${esc(c.name)}</b><span>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.rarity || "No rarity listed")}</span></span>
         <span class="tick" aria-hidden="true"></span></button></li>`).join("")}</ul></div>` : (add.read && add.step !== "reading" ? `<p class="muted" style="margin:0">No catalogue match for that reading. Search below.</p>` : "");
 
-  const showSearch = add.step === "search" || (add.step === "review" && (!add.read || !add.cands.length || add.showSearch));
+  const showSearch = add.step === "search" || (add.step === "review" && ((!add.read && !add.ocr) || !add.cands.length || add.showSearch));
   const searchHtml = add.step === "reading" ? "" : (showSearch
     ? `<div class="field"><label for="catQ">Find the card</label><input id="catQ" type="search" placeholder="e.g. Charizard 4/102 or Pikachu Surging Sparks" value="${esc(add.searchQ)}" autocomplete="off"></div>`
     : `<div><button class="linkbtn" type="button" id="showSearch">Not right? Search the catalogue</button></div>`);
@@ -734,9 +821,8 @@ function renderAdd() {
         <div class="field"><label for="finSel">Finish</label><select id="finSel">${FINISHES.map(([k, l]) => `<option value="${k}" ${k === add.finish ? "selected" : ""}>${l}</option>`).join("")}</select></div>
         <div class="field"><label for="qtyIn">Copies</label><div class="qty"><button type="button" data-q="-1" aria-label="One fewer">−</button><input id="qtyIn" type="number" min="1" max="999" value="${add.qty}"><button type="button" data-q="1" aria-label="One more">+</button></div></div>
       </div>
-      ${manual ? `<div class="field"><label for="condSel">Condition (your call)</label><select id="condSel">
-        ${[["", "Not set"], ["9", "Near Mint, looks perfect (about 9)"], ["8", "Near Mint, tiny flaw (about 8)"], ["6", "Lightly played (about 6)"], ["4", "Moderately played (about 4)"], ["2", "Heavily played or damaged (about 2)"]].map(([v, l]) => `<option value="${v}" ${String(c.grade || "") === v ? "selected" : ""}>${l}</option>`).join("")}
-      </select></div>` : slabHtml(add.cond)}
+      ${manual ? `<div class="field"><label for="condSel">Condition (your call)</label><select id="condSel">${condOptions(c.grade)}</select></div>${c.centering ? slabHtml(add.cond) : ""}` : slabHtml(add.cond)}
+      ${add.url ? `<div><button class="btn small" type="button" id="cenBtn">${c.centeringMeasured ? "Measure centering again" : "Measure centering"}</button></div>` : ""}
       <button class="btn primary" type="button" id="saveCard">Add to collection</button>`;
   }
   b.innerHTML = `<div class="shot">${shot}<div class="status" aria-live="polite">${statusHtml}</div></div>${candList}${searchHtml}${condHtml}`;
@@ -751,7 +837,8 @@ function renderAdd() {
   const fs = $("#finSel"); if (fs) fs.addEventListener("change", () => add.finish = fs.value);
   const qi = $("#qtyIn"); if (qi) qi.addEventListener("change", () => add.qty = Math.max(1, Math.min(999, parseInt(qi.value) || 1)));
   b.querySelectorAll("[data-q]").forEach(el => el.addEventListener("click", () => { add.qty = Math.max(1, Math.min(999, add.qty + parseInt(el.dataset.q))); $("#qtyIn").value = add.qty; }));
-  const cs = $("#condSel"); if (cs) cs.addEventListener("change", () => { add.cond = cs.value ? { grade: Number(cs.value), source: "manual" } : null; });
+  const cs = $("#condSel"); if (cs) cs.addEventListener("change", () => { add.cond = { ...(add.cond || {}), grade: cs.value ? Number(cs.value) : null, source: "manual" }; renderAdd(); });
+  const cb = $("#cenBtn"); if (cb) cb.addEventListener("click", () => { add.prevStep = add.step; add.step = "centering"; renderAdd(); });
   const sv = $("#saveCard"); if (sv) sv.addEventListener("click", saveAdd);
 }
 function renderCands() {
@@ -790,6 +877,18 @@ async function takePhoto(file) {
       if (code === "not_granted") AI.images = false;
     }
     add.step = "review"; renderAdd();
+  } else if (ocrUsable()) {
+    add.step = "reading"; add.status = "Reading the card number…"; renderAdd();
+    try {
+      const text = await readByOCR(add.blob, s => { add.status = s; if (add.step === "reading") renderAdd(); });
+      const r = matchOCR(text);
+      add.ocr = { number: r.number }; add.cands = r.cands; add.chosen = r.cands[0] || null;
+      if (r.number && !r.cands.length) add.searchQ = r.number;
+    } catch (e) {
+      add.err = "The text reader couldn't load. Check your connection, or search below.";
+    }
+    if (!add.cands.length && add.searchQ) add.cands = searchCatalogue(add.searchQ, 20);
+    add.step = "review"; renderAdd();
   } else { add.step = "search"; renderAdd(); }
 }
 async function saveAdd() {
@@ -808,13 +907,14 @@ async function saveAdd() {
   }
 }
 function slabHtml(cond) {
-  if (!cond || cond.grade == null) return "";
+  if (!cond || (cond.grade == null && !cond.centering)) return "";
   const src = cond.source === "photo" ? "From your photo" : "Your own call";
+  const capLine = cond.centeringCap ? ` (centering alone allows up to ${esc(cond.centeringCap)})` : "";
   return `<div class="slab">
     <div class="slab-top"><div><div class="k">Condition estimate</div><div style="font-weight:600">${esc(src)}</div></div>
-      <div class="g">${esc(cond.grade)}<small>${cond.range ? "likely " + esc(cond.range) : "of 10"}</small></div></div>
-    ${cond.source === "photo" ? `<dl>
-      ${cond.centering ? `<dt>Centering</dt><dd>${esc(cond.centering)}</dd>` : ""}
+      <div class="g">${cond.grade == null ? "—" : esc(cond.grade)}<small>${cond.range ? "likely " + esc(cond.range) : cond.grade == null ? "grade not set" : "of 10"}</small></div></div>
+    ${cond.source === "photo" || cond.centering ? `<dl>
+      ${cond.centering ? `<dt>Centering</dt><dd>${esc(cond.centering)}${cond.centeringMeasured ? " (measured)" : ""}${capLine}</dd>` : ""}
       ${cond.corners ? `<dt>Corners</dt><dd>${esc(cond.corners)}</dd>` : ""}
       ${cond.edges ? `<dt>Edges</dt><dd>${esc(cond.edges)}</dd>` : ""}
       ${cond.surface ? `<dt>Surface</dt><dd>${esc(cond.surface)}</dd>` : ""}
@@ -824,14 +924,81 @@ function slabHtml(cond) {
   </div>`;
 }
 
+/* ---------- centering tool ---------- */
+/* PSA's published front-centering limits: worst side ratio -> highest grade centering allows */
+const CEN_CAPS = [[55, 10], [60, 9], [65, 8], [70, 7], [80, 6], [85, 5], [90, 3], [101, 1]];
+function centeringEditor(host, url, box, done) {
+  const b = Object.assign({ oL: 3, iL: 9, iR: 91, oR: 97, oT: 2.5, iT: 7, iB: 93, oB: 97.5 }, box || {});
+  const LINES = [["oL", "v", "outer", "Card left edge"], ["iL", "v", "inner", "Frame left edge"], ["iR", "v", "inner", "Frame right edge"], ["oR", "v", "outer", "Card right edge"],
+                 ["oT", "h", "outer", "Card top edge"], ["iT", "h", "inner", "Frame top edge"], ["iB", "h", "inner", "Frame bottom edge"], ["oB", "h", "outer", "Card bottom edge"]];
+  const ORDER = { v: ["oL", "iL", "iR", "oR"], h: ["oT", "iT", "iB", "oB"] };
+  host.innerHTML = `
+    <p class="muted" style="margin:0">Drag the <span class="key-outer">red lines</span> to the card's outside edges and the <span class="key-inner">blue lines</span> to where the border meets the picture frame. A straight-on photo gives the truest reading.</p>
+    <div class="cen-stage" id="cenStage"><img src="${esc(url)}" alt="Your photo of the card">${LINES.map(([k, dir, kind, label]) => `<div class="cen-line ${dir} ${kind}" data-k="${k}" tabindex="0" role="slider" aria-label="${label}"></div>`).join("")}</div>
+    <div class="cen-read" id="cenRead"></div>
+    <div class="actions"><button class="btn primary" type="button" id="cenDone">Use this centering</button><button class="btn" type="button" id="cenCancel">Cancel</button></div>`;
+  const stage = $("#cenStage", host);
+  const place = () => {
+    stage.querySelectorAll(".cen-line").forEach(el => {
+      const k = el.dataset.k, v = b[k];
+      if (el.classList.contains("v")) el.style.left = v + "%"; else el.style.top = v + "%";
+      el.setAttribute("aria-valuenow", v.toFixed(1));
+    });
+    const r = calc();
+    $("#cenRead", host).innerHTML = `
+      <div class="fact"><div class="k">Left / right</div><div class="v">${r.lr}</div></div>
+      <div class="fact"><div class="k">Top / bottom</div><div class="v">${r.tb}</div></div>
+      <div class="fact"><div class="k">Allows up to</div><div class="v">${r.cap}</div></div>`;
+  };
+  const calc = () => {
+    const ratio = (a, z) => { const t = a + z; if (t <= 0) return 50; return Math.round(100 * a / t); };
+    const l = ratio(b.iL - b.oL, b.oR - b.iR), t = ratio(b.iT - b.oT, b.oB - b.iB);
+    const worst = Math.max(l, 100 - l, t, 100 - t);
+    const cap = CEN_CAPS.find(([lim]) => worst <= lim)[1];
+    return { lr: `${l}/${100 - l}`, tb: `${t}/${100 - t}`, cap };
+  };
+  const setVal = (k, v) => {
+    const dir = ORDER.v.includes(k) ? "v" : "h"; const ord = ORDER[dir]; const i = ord.indexOf(k);
+    const lo = i > 0 ? b[ord[i - 1]] + 0.3 : 0, hi = i < 3 ? b[ord[i + 1]] - 0.3 : 100;
+    b[k] = Math.round(Math.max(lo, Math.min(hi, v)) * 10) / 10; place();
+  };
+  let drag = null;
+  stage.addEventListener("pointerdown", e => {
+    const el = e.target.closest(".cen-line"); if (!el) return;
+    drag = el.dataset.k; el.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  stage.addEventListener("pointermove", e => {
+    if (!drag) return; const rc = stage.getBoundingClientRect();
+    setVal(drag, ORDER.v.includes(drag) ? (e.clientX - rc.left) / rc.width * 100 : (e.clientY - rc.top) / rc.height * 100);
+  });
+  const end = () => { drag = null; };
+  stage.addEventListener("pointerup", end); stage.addEventListener("pointercancel", end);
+  stage.addEventListener("keydown", e => {
+    const el = e.target.closest(".cen-line"); if (!el) return; const k = el.dataset.k; const step = e.shiftKey ? 1 : 0.2;
+    const d = { ArrowLeft: -step, ArrowUp: -step, ArrowRight: step, ArrowDown: step }[e.key]; if (d == null) return;
+    e.preventDefault(); setVal(k, b[k] + d);
+  });
+  $("#cenDone", host).addEventListener("click", () => { const r = calc(); done({ box: { ...b }, text: `${r.lr} L-R, ${r.tb} T-B`, cap: r.cap }); });
+  $("#cenCancel", host).addEventListener("click", () => done(null));
+  place();
+}
+
 /* ---------- detail ---------- */
-let detailId = null, confirmDelete = false;
-async function openDetail(id) { detailId = id; confirmDelete = false; await renderDetail(); $("#detailSheet").showModal(); }
+let detailId = null, confirmDelete = false, detailCentering = false;
+async function openDetail(id) { detailId = id; confirmDelete = false; detailCentering = false; await renderDetail(); $("#detailSheet").showModal(); }
 async function renderDetail() {
   const c = Store.cards.find(x => x.id === detailId); const b = $("#detailBody");
   if (!c) { $("#detailSheet").open && $("#detailSheet").close(); return; }
   $("#detailTitle").textContent = c.name;
   const photo = await Store.photoURL(c); const cat = Cat.byId.get(c.cardId);
+  if (detailCentering && photo) {
+    centeringEditor(b, photo, c.condition && c.condition.centeringBox, async res => {
+      detailCentering = false;
+      if (res) await Store.put({ ...c, condition: { ...(c.condition || { source: "manual", grade: null }), centering: res.text, centeringCap: res.cap, centeringMeasured: true, centeringBox: res.box } });
+      renderDetail();
+    });
+    return;
+  }
   const p = c.price; const mine = pickPrice(c);
   const usdRows = p && p.usd ? Object.entries(p.usd).map(([k, v]) => `<tr class="${k === (mine && mine.finish) ? "mine" : ""}"><td>${esc(finishLabel(k))}</td><td>${usd(v.market)}</td><td>${usd(v.low)}</td><td>${usd(v.mid)}</td><td>${usd(v.high)}</td></tr>`).join("") : "";
   const eurRow = p && p.eur ? `<p class="src" style="margin:8px 0 0">Cardmarket (Europe): trend ${eur(p.eur.trend)} · 30-day average ${eur(p.eur.avg30)} · low ${eur(p.eur.low)}</p>` : "";
@@ -860,6 +1027,8 @@ async function renderDetail() {
       <div class="field"><label for="dQty">Copies</label><input id="dQty" type="number" min="1" max="999" value="${c.qty || 1}"></div>
     </div>
     ${slabHtml(c.condition) || `<p class="muted" style="margin:0">No condition estimate for this card.</p>`}
+    ${!c.condition || c.condition.source !== "photo" ? `<div class="field"><label for="dCond">Condition (your call)</label><select id="dCond">${condOptions(c.condition && c.condition.grade)}</select></div>` : ""}
+    ${photo ? `<div><button class="btn small" type="button" id="dCen">${c.condition && c.condition.centeringMeasured ? "Measure centering again" : "Measure centering"}</button></div>` : ""}
     <div><p class="section-label">Prices</p>${priceHtml}</div>
     <div class="actions">
       <button class="btn small" type="button" id="dRefresh">Refresh price</button>
@@ -871,6 +1040,8 @@ async function renderDetail() {
       : `<div><button class="btn danger small" type="button" id="dDel">Remove from collection</button></div>`}`;
   $("#dFin").addEventListener("change", e => Store.put({ ...c, finish: e.target.value }).then(renderDetail));
   $("#dQty").addEventListener("change", e => Store.put({ ...c, qty: Math.max(1, Math.min(999, parseInt(e.target.value) || 1)) }).then(renderDetail));
+  const dc = $("#dCond"); if (dc) dc.addEventListener("change", e => Store.put({ ...c, condition: { ...(c.condition || {}), source: "manual", grade: e.target.value ? Number(e.target.value) : null } }).then(renderDetail));
+  const dcen = $("#dCen"); if (dcen) dcen.addEventListener("click", () => { detailCentering = true; renderDetail(); });
   $("#dRefresh").addEventListener("click", async e => { e.target.disabled = true; e.target.textContent = "Checking…"; await refreshPrices(true, [c]).catch(() => {}); renderDetail(); });
   const del = $("#dDel"); if (del) del.addEventListener("click", () => { confirmDelete = true; renderDetail(); });
   const yes = $("#dDelYes"); if (yes) yes.addEventListener("click", async () => { const name = c.name; await Store.remove(c); photoCache.delete(c.id); $("#detailSheet").close(); toast(`Removed ${name}`); });
@@ -898,7 +1069,9 @@ Store.onChange(() => { renderList(); if ($("#detailSheet").open) renderDetail();
   const cat = loadCatalogue().catch(() => Notices.show("cat", "The card catalogue didn't load, so new cards can't be matched. Reopen the page to try again.", false));
   await Promise.all([Store.init(), initAI(), cat]);
   $("#modeLine").textContent = `${Cat.cards.length.toLocaleString()} English cards · ${Cat.sets.length} sets` + (Store.mode === "cloud" ? " · saved to your Claude account" : Store.mode === "local" ? " · saved in this browser" : "");
-  if (!(AI.sample && AI.images)) $("#emptyText").textContent = "Tap Add a card, add a photo of the front, then find it by name or number. It's logged with its official set, number, rarity and price.";
+  if (!(AI.sample && AI.images)) $("#emptyText").textContent = ocrUsable()
+    ? "Tap Add a card and take a photo of the front. The app reads the collector number to find the card, then logs it with its official set, rarity and live price. You can measure centering from the photo too."
+    : "Tap Add a card, add a photo of the front, then find it by name or number. It's logged with its official set, number, rarity and price.";
   renderList();
   refreshPrices(false).catch(() => {});
 })();
