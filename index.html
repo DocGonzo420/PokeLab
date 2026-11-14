@@ -429,7 +429,7 @@ function fromPTCG(c) {
   const cm = c.cardmarket && c.cardmarket.prices;
   const eurP = cm ? { trend: cm.trendPrice ?? null, avg30: cm.avg30 ?? null, low: cm.lowPrice ?? null, avg: cm.averageSellPrice ?? null, reverseTrend: cm.reverseHoloTrend ?? null } : null;
   if (!Object.keys(usdP).length && !eurP) return null;
-  return { usd: usdP, eur: eurP, source: "pokemontcg.io (TCGplayer and Cardmarket)", updated: (tp && tp.updatedAt) || (c.cardmarket && c.cardmarket.updatedAt) || "", url: tp && tp.url || "", fetchedAt: Date.now() };
+  return { usd: usdP, eur: eurP, source: "pokemontcg.io (TCGplayer and Cardmarket)", updated: (tp && tp.updatedAt) || (c.cardmarket && c.cardmarket.updatedAt) || "", url: tp && tp.url || "", fetchedAt: Date.now(), v: 2 };
 }
 function fromTCGdex(d) {
   const pr = d && d.pricing; if (!pr) return null;
@@ -441,7 +441,7 @@ function fromTCGdex(d) {
   const cm = pr.cardmarket;
   const eurP = cm ? { trend: cm.trend ?? null, avg30: cm.avg30 ?? null, low: cm.low ?? null, avg: cm.avg ?? null, reverseTrend: cm["trend-holo"] ?? null } : null;
   if (!Object.keys(usdP).length && !eurP) return null;
-  return { usd: usdP, eur: eurP, source: "TCGdex (TCGplayer and Cardmarket)", updated: (pr.tcgplayer && pr.tcgplayer.updated) || (cm && cm.updated) || "", url: "", fetchedAt: Date.now() };
+  return { usd: usdP, eur: eurP, source: "TCGdex (TCGplayer and Cardmarket)", updated: (pr.tcgplayer && pr.tcgplayer.updated) || (cm && cm.updated) || "", url: "", fetchedAt: Date.now(), v: 2 };
 }
 /* TCGdex updates daily, so it goes first. Its ids match the official ones for older
    sets (base1-4) but not newer ones (sv08 vs sv8), so a direct hit must match name
@@ -454,12 +454,18 @@ async function priceFromTCGdex(card) {
       if (d && norm(d.name) === norm(card.name) && sameNum(d)) return fromTCGdex(d);
     } catch (e) { if (!e || !e.status) throw e; }
   }
-  const list = await getJSON(`https://api.tcgdex.net/v2/en/cards?name=eq:${encodeURIComponent(card.name)}&localId=eq:${encodeURIComponent(card.number)}`);
-  if (!Array.isArray(list) || !list.length) return null;
-  const want = norm(card.setName);
-  for (const b of list.slice(0, 4)) {
+  // TCGdex's exact-name filter misses names with spaces and its numbers are zero-padded,
+  // so search by name and match the number here
+  const list = await getJSON(`https://api.tcgdex.net/v2/en/cards?name=${encodeURIComponent(card.name)}`);
+  if (!Array.isArray(list)) return null;
+  const hits = list.filter(b => sameNum(b) && norm(b.name) === norm(card.name) && !/^[AB]\d/.test(b.id));
+  if (!hits.length) return null;
+  // set names differ a little between sources, so the printed set size also counts as a match
+  const want = norm(card.setName), total = Number(card.printedTotal) || 0;
+  const setOk = d => d && d.set && (norm(d.set.name) === want || (total && d.set.cardCount && d.set.cardCount.official === total));
+  for (const b of hits.slice(0, 4)) {
     const d = await getJSON(`https://api.tcgdex.net/v2/en/cards/${encodeURIComponent(b.id)}`);
-    if (list.length === 1 || norm(d.set && d.set.name) === want) return fromTCGdex(d);
+    if (setOk(d)) return fromTCGdex(d);
   }
   return null;
 }
@@ -757,7 +763,7 @@ const STALE = 6 * 3600 * 1000;
 async function refreshPrices(force, only) {
   if (PriceState.busy) return; PriceState.busy = true;
   try {
-    const due = (only || Store.cards).filter(c => c.cardId && (force || !c.price || !c.price.fetchedAt || Date.now() - c.price.fetchedAt > STALE));
+    const due = (only || Store.cards).filter(c => c.cardId && (force || !c.price || !c.price.fetchedAt || c.price.v !== 2 || Date.now() - c.price.fetchedAt > STALE));
     if (!due.length) return;
     const { prices, reached } = await fetchPrices(due);
     PriceState.tried = true;
