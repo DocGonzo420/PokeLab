@@ -29,6 +29,7 @@ addEventListener("error", e => { document.title = "T:WERR " + e.message; });
 addEventListener("unhandledrejection", e => { document.title = "T:REJ " + (e.reason && e.reason.message || e.reason); });
 </script>
 
+
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="description" content="Log your Pokemon cards from photos with official set numbers, rarity, condition and live prices.">
@@ -180,6 +181,10 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .scan-focus{position:absolute;width:60px;height:60px;margin:-30px 0 0 -30px;border:2px solid #ffd36b;border-radius:50%;opacity:0;transform:scale(1.4);transition:opacity .25s,transform .25s;pointer-events:none}
 .scan-focus.on{opacity:1;transform:scale(1)}
 .scan-ctl{display:grid;gap:8px;margin:0}
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:11px;overflow:hidden;width:100%;max-width:440px;margin:0 auto}
+.seg button{height:42px;border:0;background:var(--surface);color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
 .scan-ctl label{display:grid;grid-template-columns:7.2em 1fr;align-items:center;gap:10px;font-size:14px}
 .scan-ctl input[type=range]{width:100%;accent-color:var(--accent)}
 
@@ -863,7 +868,37 @@ function ocrWorker(onStatus) {
 /* live camera scan: reads the collector number from the video, like a barcode scanner */
 const Scan = { stream: null, track: null, run: 0, torch: false, caps: {}, focusTimer: 0, toldFocus: false, skipKey: "", skipSeen: 0, added: 0, lastName: "" };
 const scanKey = n => String(n || "").replace(/[^0-9A-Z\/]/gi, "").toUpperCase();
-function scanAddedMsg() { return `Added ${Scan.lastName}${Scan.added > 1 ? ` (${Scan.added} so far)` : ""}. Put the next card in the frame.`; }
+function scanAddedMsg() { return `Added ${Scan.lastName}${Scan.added > 1 ? ` (${Scan.added} so far)` : ""}. Put the next card in the frame${scanShotMode() ? " and tap Scan card" : ""}.`; }
+const scanShotMode = () => ScanPrefs.mode === "shot";
+async function scanShot(btn) {
+  const video = $("#scanVideo"), hint = $("#scanHint");
+  const card = Scan.stream && video && scanCrop(video, $("#scanBox"), $("#scanFrame"));
+  if (!card) return;
+  const run = ++Scan.run;
+  if (btn) btn.disabled = true;
+  hint.textContent = "Reading the card…";
+  try { navigator.vibrate && navigator.vibrate(20); } catch (e) {}
+  let w = null;
+  try { w = await ocrWorker(t => { if (run === Scan.run) hint.textContent = t; }); } catch (e) {}
+  if (run !== Scan.run) return;
+  let text = "", r = { cands: [], number: "" };
+  if (w) {
+    const rec = async cv => { try { return ((await w.recognize(cv)).data.text) || ""; } catch (e) { return ""; } };
+    const scale = Math.min(3, Math.max(1.4, 1000 / card.width));
+    text = await rec(scanStrip(card, 0.85, 0.15, scale)); r = matchOCR(text);
+    if (!(r.number && r.cands.length)) { const t2 = await rec(scanStrip(card, 0.72, 0.28, Math.min(2.2, scale))); const r2 = matchOCR(t2); if (r2.number && r2.cands.length) { r = r2; text = t2; } }
+    if (run !== Scan.run) return;
+  }
+  if (r.number && r.cands.length) return scanFound(run, card, text, r, w);
+  /* no number read: keep the photo and search, then come back to the camera after Add */
+  const blob = await canvasBlob(card);
+  if (run !== Scan.run) return;
+  Scan.run++; clearTimeout(Scan.idleTimer); Scan.idleTimer = setTimeout(stopScan, 60000);
+  if (add.url) URL.revokeObjectURL(add.url);
+  add.photoBlob = blob; add.blob = blob; add.url = URL.createObjectURL(blob);
+  add.ocr = { number: "", live: true, key: "" }; add.cands = []; add.chosen = null; add.searchQ = "";
+  add.step = "review"; renderAdd();
+}
 /* frame size and place (in % of the camera box), camera zoom and focus are remembered, so a scanner stand only needs setting once */
 const SCAN_FRAME = { size: 86, cx: 50, cy: 50 };
 const ScanPrefs = (() => { try { return Object.assign({ ...SCAN_FRAME }, JSON.parse(localStorage.getItem("pokelab-scan") || "{}")); } catch (e) { return { ...SCAN_FRAME }; } })();
@@ -1022,8 +1057,9 @@ async function scanLoop(run) {
   const video = $("#scanVideo"), box = $("#scanBox"), frame = $("#scanFrame"), hint = $("#scanHint");
   let w;
   try { w = await ocrWorker(t => { if (run === Scan.run) hint.textContent = t; }); }
-  catch (e) { if (run === Scan.run) hint.textContent = "The text reader couldn't load, so the camera can't read numbers. Tap Take photo now and search instead."; return; }
+  catch (e) { if (run === Scan.run) hint.textContent = "The text reader couldn't load, so the camera can't read numbers. Tap Scan now and search instead."; return; }
   if (run !== Scan.run) return;
+  if (scanShotMode()) { hint.textContent = Scan.added ? scanAddedMsg() : "Line the card up in the frame, then tap Scan card."; return; }
   const guide = "Line the frame up with the card, with the card number inside the yellow box.";
   hint.textContent = Scan.skipKey ? scanAddedMsg() : guide;
   let started = Date.now(), last = "", warned = false;
@@ -1049,7 +1085,7 @@ async function scanLoop(run) {
       last = ""; box.classList.remove("seen");
       if (Scan.skipKey && Date.now() - Scan.skipSeen > 2500) { Scan.skipKey = ""; started = Date.now(); }
     }
-    if (!warned && !Scan.skipKey && Date.now() - started > 12000) { warned = true; hint.textContent = "Can't read the number yet. Try more light, hold the card flat, or tap Take photo now."; }
+    if (!warned && !Scan.skipKey && Date.now() - started > 12000) { warned = true; hint.textContent = "Can't read the number yet. Try more light, hold the card flat, or tap Scan now."; }
     await pause(120);
   }
 }
@@ -1473,7 +1509,8 @@ function renderAdd() {
   if (add.step === "scan") {
     b.innerHTML = `
       <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view. Tap to focus."></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div><span class="scan-focus" id="scanFocus" aria-hidden="true"></span></div>
-      <p class="muted" id="scanHint" role="status" style="margin:0">${Scan.skipKey ? esc(scanAddedMsg()) : "Starting the camera…"}</p>
+      <div class="seg" role="group" aria-label="Scan mode"><button type="button" data-smode="auto" aria-pressed="${!scanShotMode()}">Continuous</button><button type="button" data-smode="shot" aria-pressed="${scanShotMode()}">Single shot</button></div>
+      <p class="muted" id="scanHint" role="status" style="margin:0">${Scan.added ? esc(scanAddedMsg()) : "Starting the camera…"}</p>
       <div class="scan-ctl">
         <label>Frame size <input type="range" id="scanSize" min="30" max="100" step="1" value="${Math.round(ScanPrefs.size)}"></label>
         <label id="scanZoomRow" hidden>Camera zoom <input type="range" id="scanZoom"></label>
@@ -1481,7 +1518,7 @@ function renderAdd() {
         <p class="src" style="margin:0">Drag the frame to move it, pinch or use the slider to resize it, and tap the picture to focus. It remembers where you put it. <button class="linkbtn" type="button" id="scanReset">Reset frame</button></p>
       </div>
       <div class="export-actions">
-        <button class="btn primary" type="button" id="scanSnap">Take photo now</button>
+        <button class="btn primary" type="button" id="scanSnap">${scanShotMode() ? "Scan card" : "Scan now"}</button>
         <button class="btn" type="button" id="scanTorch" aria-pressed="${Scan.torch}">${Scan.torch ? "Flash on" : "Flash off"}</button>
         <button class="btn" type="button" id="scanBack">${Scan.added ? "Done" : "Back"}</button>
       </div>`;
@@ -1498,11 +1535,11 @@ function renderAdd() {
     $("#scanZoom").addEventListener("change", saveScanPrefs);
     $("#scanFocusDist").addEventListener("input", e => { if (!Scan.track) return; ScanPrefs.focus = Number(e.target.value); clearTimeout(Scan.focusTimer); Scan.track.applyConstraints({ advanced: [{ focusMode: "manual", focusDistance: ScanPrefs.focus }] }).catch(() => {}); });
     $("#scanFocusDist").addEventListener("change", saveScanPrefs);
-    $("#scanSnap").addEventListener("click", async () => {
-      const card = Scan.stream && scanCrop($("#scanVideo"), $("#scanBox"), $("#scanFrame"));
-      if (!card) return;
-      const blob = await canvasBlob(card); stopScan(); takePhoto(blob);
-    });
+    $("#scanSnap").addEventListener("click", e => scanShot(e.currentTarget));
+    b.querySelectorAll("[data-smode]").forEach(el => el.addEventListener("click", () => {
+      if (ScanPrefs.mode === el.dataset.smode || (!ScanPrefs.mode && el.dataset.smode === "auto")) return;
+      ScanPrefs.mode = el.dataset.smode; saveScanPrefs(); startScan();
+    }));
     $("#scanTorch").addEventListener("click", async e => {
       const btn = e.currentTarget; if (!Scan.track) return;
       if (!Scan.caps.torch) { scanHintOnce("This browser doesn't let websites turn on the phone's flash. A lamp or the stand's light works instead."); return; }
@@ -1545,7 +1582,7 @@ function renderAdd() {
   } else if (add.ocr) {
     statusHtml = add.ocr.number
       ? `<span class="line">Read <span class="mono">${esc(add.ocr.number)}</span> ${add.ocr.live ? "with the camera" : "from your photo"}</span><span class="read">${add.cands.length ? "Check it's the right card." : "No card has that number. Search below."}</span>${add.ocr.live ? `<span><button class="btn small" type="button" id="rescanBtn">Scan again</button></span>` : ""}`
-      : `<span class="line">Couldn't read the number</span><span class="read">${add.cands.length ? "These names showed up in the photo." : "Search below, or try a sharper, closer photo."}</span>`;
+      : `<span class="line">Couldn't read the number</span><span class="read">${add.cands.length ? "These names showed up in the photo." : "Search below, or try a sharper, closer photo."}</span>${add.ocr.live ? `<span><button class="btn small" type="button" id="rescanBtn">Scan again</button></span>` : ""}`;
   } else if (add.photoBlob) statusHtml = `<span class="line">Photo added</span><span class="read">${aiOn ? "" : "Find the card below."}</span>`;
   if (add.err) statusHtml += `<span class="err">${esc(add.err)}</span>`;
 
