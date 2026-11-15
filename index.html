@@ -28,6 +28,7 @@ if (/[?&]bindertest=/.test(location.search)) addEventListener("load", async () =
 addEventListener("error", e => { document.title = "T:WERR " + e.message; });
 addEventListener("unhandledrejection", e => { document.title = "T:REJ " + (e.reason && e.reason.message || e.reason); });
 </script>
+
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="description" content="Log your Pokemon cards from photos with official set numbers, rarity, condition and live prices.">
@@ -158,9 +159,9 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .binder-stage{position:relative;flex:none;width:100%;max-width:440px;margin:0 auto;border-radius:12px;overflow:hidden;background:#000;touch-action:none;user-select:none;-webkit-user-select:none}
 .binder-stage img{display:block;width:100%;height:auto;pointer-events:none}
 .binder-frame{position:absolute;display:grid;border:2px solid #ffd36b;box-shadow:0 0 0 999px rgba(0,0,0,.35);cursor:move;touch-action:none}
-.binder-frame>i{border:1px dashed rgba(255,255,255,.8);font-style:normal;font-size:11px;font-weight:600;color:#fff;padding:2px 4px;text-shadow:0 1px 2px #000;pointer-events:none}
-.bh{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:#ffd36b;border:2px solid #000;touch-action:none}
-.bh[data-h=tl]{left:0;top:0}.bh[data-h=tr]{left:100%;top:0}.bh[data-h=bl]{left:0;top:100%}.bh[data-h=br]{left:100%;top:100%}
+.binder-frame>i{border:1px dashed rgba(255,255,255,.8);font-style:normal;font-size:11px;font-weight:600;color:#fff;padding:2px 4px;text-align:center;text-shadow:0 1px 2px #000;pointer-events:none}
+.bh{position:absolute;width:30px;height:30px;border-radius:50%;background:#ffd36b;border:2px solid #000;touch-action:none}
+.bh[data-h=tl]{left:-3px;top:-3px}.bh[data-h=tr]{right:-3px;top:-3px}.bh[data-h=bl]{left:-3px;bottom:-3px}.bh[data-h=br]{right:-3px;bottom:-3px}
 .binder-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
 .brow{display:grid;grid-template-columns:52px 52px 1fr;gap:10px;align-items:start}
 .brow .bimg{width:52px;aspect-ratio:63/88;object-fit:cover;border-radius:6px;background:var(--sunk);display:block}
@@ -1322,7 +1323,7 @@ function binderCellHtml(cell, i) {
   if (cell.status !== "done") body = `<span class="t">${cell.status === "reading" ? `<span class="spinner" aria-hidden="true"></span> Reading…` : "Waiting…"}</span>`;
   else {
     const opts = cell.cands.map(x => `<option value="${esc(x.id)}" ${c && c.id === x.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.set.name)} ${esc(x.number)}/${esc(x.set.total ?? "?")}</option>`).join("");
-    body = `<span class="t">${c ? `<b>${esc(c.name)}</b>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.rarity || "No rarity listed")}` : `<b>Pocket ${i + 1}: ${cell.number ? `read ${esc(cell.number)}, no match` : "nothing read"}</b>Skipped. Search to add it.`}</span>
+    body = `<span class="t">${c ? `<b>${esc(c.name)}</b>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.rarity || "No rarity listed")}` : `<b>Pocket ${i + 1}: ${cell.cands.length ? "skipped" : cell.number ? `read ${esc(cell.number)}, no match` : "nothing read"}</b>${cell.cands.length ? "Pick a card above or search to add it." : "Skipped. Search to add it."}`}</span>
       ${cell.cands.length ? `<select data-bsel="${i}" aria-label="Card in pocket ${i + 1}">${opts}<option value="" ${c ? "" : "selected"}>Skip this pocket</option></select>` : ""}
       <input type="search" data-bq="${i}" placeholder="Search name or number" value="${esc(cell.q)}" aria-label="Search for the card in pocket ${i + 1}" autocomplete="off" ${c && !cell.q ? "hidden" : ""}>
       ${c && !cell.q ? `<span><button class="linkbtn" type="button" data-bfind="${i}">Not right? Search</button></span>` : ""}`;
