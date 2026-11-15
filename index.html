@@ -1690,8 +1690,9 @@ function saveFile(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 function shownNote(rows) {
-  const all = Store.cards.length;
-  return rows.length < all ? `the ${rows.length} of ${all} cards your filters show` : `all ${rows.length} card${rows.length === 1 ? "" : "s"}`;
+  const copies = list => list.reduce((n, c) => n + (c.qty || 1), 0);
+  const n = copies(rows), all = copies(Store.cards);
+  return n < all ? `the ${n} of your ${all} cards that your filters show` : `all ${n} of your card${n === 1 ? "" : "s"}`;
 }
 
 function loadImg(src) {
