@@ -17,11 +17,11 @@
 if (/[?&]bindertest=/.test(location.search)) addEventListener("load", async () => {
   try {
     document.title = "T:waiting";
-    while (!(typeof Cat !== "undefined" && Cat.ready)) await new Promise(r => setTimeout(r, 300));
+    while (!(window.__t && __t.Cat.ready)) await new Promise(r => setTimeout(r, 300));
     document.title = "T:fetch";
     const res = await fetch("binder-test.jpg"); const blob = await res.blob();
     document.title = "T:start " + res.status + " " + blob.size;
-    openAdd(); binderStart([new File([blob], "page.jpg", { type: "image/jpeg" })]);
+    __t.openAdd(); __t.binderStart([new File([blob], "page.jpg", { type: "image/jpeg" })]);
     document.title = "T:started";
   } catch (e) { document.title = "T:ERR " + e; }
 });
@@ -2682,6 +2682,7 @@ Store.onChange(() => {
   setTab(view.tab, true);
   refreshPrices(false).catch(() => {});
 })();
+window.__t = { Cat, openAdd, binderStart, Scan };
 })();
 </script>
 
