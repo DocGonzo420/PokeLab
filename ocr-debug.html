@@ -1,0 +1,19 @@
+<!doctype html><meta charset=utf-8><title>ocr debug</title>
+<pre id=o></pre>
+<script>
+const o=document.getElementById('o'); const log=s=>{o.textContent+=s+"\n"};
+window.onerror=(m,s,l)=>log("onerror: "+m+" "+s+":"+l);
+window.onunhandledrejection=e=>log("rejection: "+(e.reason&&(e.reason.stack||e.reason.message)||e.reason));
+(async()=>{
+  try{
+    log("Worker: "+typeof Worker+" WASM: "+typeof WebAssembly);
+    await new Promise((res,rej)=>{const s=document.createElement('script');s.src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js";s.onload=res;s.onerror=()=>rej(new Error('script'));document.head.append(s)});
+    log("script loaded");
+    const w=await Tesseract.createWorker("eng",1,{logger:m=>log(JSON.stringify(m)),errorHandler:e=>log("errorHandler: "+e)});
+    log("worker ready");
+    const c=document.createElement('canvas');c.width=400;c.height=80;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,400,80);x.fillStyle='#000';x.font='40px sans-serif';x.fillText('057/191',20,55);
+    const b=await new Promise(r=>c.toBlob(r));
+    const r=await w.recognize(b); log("TEXT: "+r.data.text);
+  }catch(e){log("CAUGHT: "+(e&&(e.stack||e.message)||e))}
+})();
+</script>
