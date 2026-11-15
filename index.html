@@ -125,6 +125,23 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .picker small{font-weight:400;color:var(--muted);font-size:12px}
 .picker input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
 .picker.wide{grid-column:1/-1;height:84px;border-style:solid;border-color:var(--accent);font:inherit;font-weight:600;color:inherit}
+.picker.full{grid-column:1/-1;height:72px}
+.binder-top{position:sticky;top:-1px;z-index:3;background:var(--surface);display:grid;gap:8px;padding:6px 0 8px;border-bottom:1px solid var(--line)}
+.binder-top .export-actions{margin:0}
+.binder-stage{position:relative;flex:none;width:100%;max-width:440px;margin:0 auto;border-radius:12px;overflow:hidden;background:#000;touch-action:none;user-select:none;-webkit-user-select:none}
+.binder-stage img{display:block;width:100%;height:auto;pointer-events:none}
+.binder-frame{position:absolute;display:grid;border:2px solid #ffd36b;box-shadow:0 0 0 999px rgba(0,0,0,.35);cursor:move;touch-action:none}
+.binder-frame>i{border:1px dashed rgba(255,255,255,.8);font-style:normal;font-size:11px;font-weight:600;color:#fff;padding:2px 4px;text-align:center;text-shadow:0 1px 2px #000;pointer-events:none}
+.bh{position:absolute;width:30px;height:30px;border-radius:50%;background:#ffd36b;border:2px solid #000;touch-action:none}
+.bh[data-h=tl]{left:-3px;top:-3px}.bh[data-h=tr]{right:-3px;top:-3px}.bh[data-h=bl]{left:-3px;bottom:-3px}.bh[data-h=br]{right:-3px;bottom:-3px}
+.binder-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.brow{display:grid;grid-template-columns:52px 52px 1fr;gap:10px;align-items:start}
+.brow .bimg{width:52px;aspect-ratio:63/88;object-fit:cover;border-radius:6px;background:var(--sunk);display:block}
+.brow .bimg.ph{display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);text-align:center}
+.bmatch{display:grid;gap:6px;min-width:0}
+.bmatch .t{font-size:13px;color:var(--muted)}
+.bmatch .t b{display:block;color:var(--ink);font-size:14.5px}
+.brow.skip .bimg{opacity:.5}
 .add-err{margin:0;color:var(--warn);font-size:13.5px}
 .scan{position:relative;width:100%;max-width:440px;margin:0 auto;aspect-ratio:3/4;max-height:60vh;border-radius:14px;overflow:hidden;background:#000;touch-action:none;user-select:none;-webkit-user-select:none}
 .scan video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
@@ -148,6 +165,9 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 @media (prefers-reduced-motion:reduce){.spinner{animation:none}}
 
 .cands{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.cand-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+.cand-row .cand{min-width:0}
+.cand-add{height:44px;padding:0 16px;font-weight:600}
 .cand{display:grid;grid-template-columns:42px 1fr auto;gap:10px;align-items:center;padding:8px 10px 8px 8px;border:1.5px solid var(--line);border-radius:12px;cursor:pointer;background:var(--surface);width:100%;text-align:left}
 .cand[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 .cand .thumb{width:42px}
@@ -553,6 +573,15 @@ function pickPrice(card) {
   return null;
 }
 const PriceState = { blocked: false, tried: false, busy: false };
+const PriceQueue = { cards: [], t: 0 };
+function priceNew(recs) {
+  PriceQueue.cards.push(...recs);
+  if (!PriceQueue.cards.length) return;
+  clearTimeout(PriceQueue.t);
+  if (PriceState.busy) { PriceQueue.t = setTimeout(() => priceNew([]), 1500); return; }
+  const batch = PriceQueue.cards.splice(0);
+  refreshPrices(false, batch).catch(() => {}).finally(() => { if (PriceQueue.cards.length) priceNew([]); });
+}
 
 async function getJSON(url, ms = 12000) {
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms);
@@ -804,7 +833,9 @@ function ocrWorker(onStatus) {
   return OCR.loading;
 }
 /* live camera scan: reads the collector number from the video, like a barcode scanner */
-const Scan = { stream: null, track: null, run: 0, torch: false, caps: {}, focusTimer: 0, toldFocus: false };
+const Scan = { stream: null, track: null, run: 0, torch: false, caps: {}, focusTimer: 0, toldFocus: false, skipKey: "", skipSeen: 0, added: 0, lastName: "" };
+const scanKey = n => String(n || "").replace(/[^0-9A-Z\/]/gi, "").toUpperCase();
+function scanAddedMsg() { return `Added ${Scan.lastName}${Scan.added > 1 ? ` (${Scan.added} so far)` : ""}. Put the next card in the frame.`; }
 /* frame size and place (in % of the camera box), camera zoom and focus are remembered, so a scanner stand only needs setting once */
 const SCAN_FRAME = { size: 86, cx: 50, cy: 50 };
 const ScanPrefs = (() => { try { return Object.assign({ ...SCAN_FRAME }, JSON.parse(localStorage.getItem("pokelab-scan") || "{}")); } catch (e) { return { ...SCAN_FRAME }; } })();
@@ -908,7 +939,7 @@ function scanUsable() { return ocrUsable() && window.isSecureContext && !!(navig
 function stopScan() {
   Scan.run++;
   if (Scan.stream) Scan.stream.getTracks().forEach(t => t.stop());
-  clearTimeout(Scan.focusTimer);
+  clearTimeout(Scan.focusTimer); clearTimeout(Scan.idleTimer);
   Scan.stream = null; Scan.track = null; Scan.torch = false; Scan.caps = {};
 }
 function scanCrop(video, box, frame) {
@@ -933,9 +964,13 @@ const canvasBlob = cv => new Promise(res => cv.toBlob(res, "image/jpeg", 0.88));
 async function startScan() {
   add.err = ""; add.step = "scan"; renderAdd();
   const run = ++Scan.run;
+  clearTimeout(Scan.idleTimer);
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
-    if (run !== Scan.run || add.step !== "scan") { stream.getTracks().forEach(t => t.stop()); return; }
+    /* the camera stays on while you check a match, so the next scan starts at once */
+    const reuse = Scan.stream && Scan.stream.active && Scan.track && Scan.track.readyState === "live";
+    const stream = reuse ? Scan.stream : await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    if (run !== Scan.run || add.step !== "scan") { if (!reuse) stream.getTracks().forEach(t => t.stop()); return; }
+    if (!reuse) { if (Scan.stream) Scan.stream.getTracks().forEach(t => t.stop()); Scan.torch = false; }
     Scan.stream = stream; Scan.track = stream.getVideoTracks()[0];
     try {
       const caps = Scan.track.getCapabilities ? Scan.track.getCapabilities() : {};
@@ -962,23 +997,31 @@ async function scanLoop(run) {
   catch (e) { if (run === Scan.run) hint.textContent = "The text reader couldn't load, so the camera can't read numbers. Tap Take photo now and search instead."; return; }
   if (run !== Scan.run) return;
   const guide = "Line the frame up with the card, with the card number inside the yellow box.";
-  hint.textContent = guide;
-  const started = Date.now(); let last = "", warned = false;
+  hint.textContent = Scan.skipKey ? scanAddedMsg() : guide;
+  let started = Date.now(), last = "", warned = false;
+  Scan.skipSeen = Date.now();
   while (run === Scan.run) {
     if (document.hidden || video.readyState < 2) { await pause(300); continue; }
     const card = scanCrop(video, box, frame); if (!card) { await pause(200); continue; }
     let r = null, text = "";
     try { text = ((await w.recognize(scanStrip(card, 0.85, 0.15, Math.min(3, Math.max(1.4, 1000 / card.width))))).data.text) || ""; r = matchOCR(text); } catch (e) {}
     if (run !== Scan.run) return;
+    if (r && r.number && r.cands.length && Scan.skipKey && scanKey(r.number) === Scan.skipKey) {
+      /* the card that was just added is still in the frame: wait for the next one */
+      Scan.skipSeen = Date.now(); last = ""; started = Date.now(); box.classList.remove("seen");
+      await pause(150); continue;
+    }
     if (r && r.number && r.cands.length) {
-      const key = r.number.replace(/[^0-9A-Z\/]/gi, "").toUpperCase();
+      const key = scanKey(r.number);
+      Scan.skipKey = "";
       if (key === last) return scanFound(run, card, text, r, w);
       last = key; box.classList.add("seen"); hint.textContent = `Reading ${r.number}… hold still`;
     } else {
       if (last) hint.textContent = warned ? hint.textContent : guide;
       last = ""; box.classList.remove("seen");
+      if (Scan.skipKey && Date.now() - Scan.skipSeen > 2500) { Scan.skipKey = ""; started = Date.now(); }
     }
-    if (!warned && Date.now() - started > 12000) { warned = true; hint.textContent = "Can't read the number yet. Try more light, hold the card flat, or tap Take photo now."; }
+    if (!warned && !Scan.skipKey && Date.now() - started > 12000) { warned = true; hint.textContent = "Can't read the number yet. Try more light, hold the card flat, or tap Take photo now."; }
     await pause(120);
   }
 }
@@ -990,11 +1033,11 @@ async function scanFound(run, card, stripText, r, w) {
   const both = matchOCR(topText + "\n" + stripText);
   const blob = await canvasBlob(card);
   if (run !== Scan.run) return;
-  stopScan();
+  Scan.run++; clearTimeout(Scan.idleTimer); Scan.idleTimer = setTimeout(stopScan, 60000);
   try { navigator.vibrate && navigator.vibrate(40); } catch (e) {}
   if (add.url) URL.revokeObjectURL(add.url);
   add.photoBlob = blob; add.blob = blob; add.url = URL.createObjectURL(blob);
-  add.ocr = { number: r.number, live: true };
+  add.ocr = { number: r.number, live: true, key: scanKey(r.number) };
   add.cands = both.cands.length ? both.cands : r.cands; add.chosen = add.cands[0] || null;
   add.step = "review"; renderAdd();
 }
@@ -1173,12 +1216,221 @@ async function refreshPrices(force, only) {
 
 /* ---------- add flow ---------- */
 const add = {};
+/* ---------- binder page import ---------- */
+const BINDER_GRIDS = { "9": [3, 3, "9 pockets (3 × 3)"], "4": [2, 2, "4 pockets (2 × 2)"], "12": [4, 3, "12 pockets (4 rows of 3)"], "16": [4, 4, "16 pockets (4 × 4)"] };
+const BINDER_FRAME = { x: 0.03, y: 0.03, w: 0.94, h: 0.94 };
+const BinderPrefs = (() => { try { const v = JSON.parse(localStorage.getItem("pokelab-binder") || "{}"); return { pockets: BINDER_GRIDS[v.pockets] ? v.pockets : "9", frame: { ...BINDER_FRAME, ...(v.frame || {}) } }; } catch (e) { return { pockets: "9", frame: { ...BINDER_FRAME } }; } })();
+function saveBinderPrefs() { try { localStorage.setItem("pokelab-binder", JSON.stringify(BinderPrefs)); } catch (e) {} }
+const binder = { pages: [], i: 0, run: 0, added: 0, timer: 0, msg: "" };
+function binderClear() {
+  binder.run++; clearTimeout(binder.timer);
+  for (const pg of binder.pages) { if (pg.url) URL.revokeObjectURL(pg.url); for (const c of pg.cells || []) if (c.url) URL.revokeObjectURL(c.url); }
+  Object.assign(binder, { pages: [], i: 0, added: 0, msg: "" });
+}
+function binderStart(files) {
+  const keep = binder.added;
+  binderClear(); binder.added = keep;
+  binder.pages = [...files].map(file => ({ file, cv: null, url: "", cells: [], state: "new" }));
+  add.err = ""; add.step = "binder"; renderAdd();
+}
+async function binderCanvas(pg) {
+  if (pg.cv) return pg.cv;
+  let src = await (window.createImageBitmap ? createImageBitmap(pg.file).catch(() => null) : null);
+  if (!src) src = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(pg.file); });
+  const k = Math.min(1, 3600 / Math.max(src.width, src.height));
+  const cv = document.createElement("canvas"); cv.width = Math.round(src.width * k); cv.height = Math.round(src.height * k);
+  cv.getContext("2d").drawImage(src, 0, 0, cv.width, cv.height);
+  const kp = Math.min(1, 1400 / Math.max(cv.width, cv.height));
+  const pv = document.createElement("canvas"); pv.width = Math.round(cv.width * kp); pv.height = Math.round(cv.height * kp);
+  pv.getContext("2d").drawImage(cv, 0, 0, pv.width, pv.height);
+  pg.url = URL.createObjectURL(await canvasBlob(pv));
+  pg.cv = cv; return cv;
+}
+function binderHint(t) { binder.msg = t; const h = $("#bHint"); if (h) h.textContent = t; }
+function binderCount() { const pg = binder.pages[binder.i]; return pg ? pg.cells.filter(c => c.chosen).length : 0; }
+function binderAddLabel() { const n = binderCount(); return n ? `Add ${n} card${n === 1 ? "" : "s"}` : "Nothing to add"; }
+async function binderRead(pg) {
+  const run = ++binder.run;
+  pg.state = "reading";
+  let cv;
+  try { cv = await binderCanvas(pg); } catch (e) { pg.state = "error"; add.err = "That photo couldn't be opened. Try a JPEG or PNG."; if (run === binder.run) renderAdd(); return; }
+  if (run !== binder.run) return;
+  for (const c of pg.cells) if (c.url) URL.revokeObjectURL(c.url);
+  const [rows, cols] = BINDER_GRIDS[BinderPrefs.pockets], f = BinderPrefs.frame;
+  const cw = f.w * cv.width / cols, ch = f.h * cv.height / rows, ix = cw * 0.02, iy = ch * 0.015;
+  pg.cells = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const sx = f.x * cv.width + c * cw + ix, sy = f.y * cv.height + r * ch + iy, sw = cw - 2 * ix, sh = ch - 2 * iy;
+    const k = Math.min(1, 1100 / sh);
+    const cell = document.createElement("canvas"); cell.width = Math.max(1, Math.round(sw * k)); cell.height = Math.max(1, Math.round(sh * k));
+    cell.getContext("2d").drawImage(cv, sx, sy, sw, sh, 0, 0, cell.width, cell.height);
+    pg.cells.push({ cv: cell, blob: null, url: "", status: "wait", number: "", cands: [], chosen: null, q: "" });
+  }
+  for (const c of pg.cells) { c.blob = await canvasBlob(c.cv); c.url = URL.createObjectURL(c.blob); }
+  if (run !== binder.run) return;
+  renderAdd();
+  let w;
+  try { w = await ocrWorker(t => { if (run === binder.run) binderHint(t); }); }
+  catch (e) { if (run !== binder.run) return; pg.state = "done"; pg.cells.forEach(c => c.status = "done"); binderHint("The text reader couldn't load, so the pockets can't be read. Search for each card below."); renderBinderList(); return; }
+  const rec = async (cvs) => { try { return ((await w.recognize(cvs)).data.text) || ""; } catch (e) { return ""; } };
+  for (let i = 0; i < pg.cells.length; i++) {
+    if (run !== binder.run) return;
+    const cell = pg.cells[i];
+    cell.status = "reading"; binderHint(`Reading pocket ${i + 1} of ${pg.cells.length}…`); binderRow(i);
+    const scale = Math.min(3, Math.max(1.4, 1000 / cell.cv.width));
+    let text = await rec(scanStrip(cell.cv, 0.8, 0.2, scale)), r = matchOCR(text);
+    if (!(r.number && r.cands.length)) { const t2 = await rec(scanStrip(cell.cv, 0.66, 0.34, Math.min(2.2, scale))); const r2 = matchOCR(t2); if (r2.number && r2.cands.length) { r = r2; text = t2; } }
+    if (r.number && r.cands.length > 1) { const top = await rec(scanStrip(cell.cv, 0.02, 0.13, 1)); const both = matchOCR(top + "\n" + text); if (both.cands.length) r = { ...r, cands: both.cands }; }
+    if (run !== binder.run) return;
+    cell.number = r.number || ""; cell.cands = cell.number ? r.cands.slice(0, 8) : []; cell.chosen = cell.cands[0] || null; cell.status = "done";
+    binderRow(i);
+  }
+  pg.state = "done";
+  const found = pg.cells.filter(c => c.chosen).length, miss = pg.cells.length - found;
+  binderHint(`Found ${found} of ${pg.cells.length} pockets.${miss ? ` Empty or unreadable pockets are skipped; search to fill one in.` : " Check them, then add."}`);
+}
+function binderCellHtml(cell, i) {
+  const c = cell.chosen;
+  let body;
+  if (cell.status !== "done") body = `<span class="t">${cell.status === "reading" ? `<span class="spinner" aria-hidden="true"></span> Reading…` : "Waiting…"}</span>`;
+  else {
+    const opts = cell.cands.map(x => `<option value="${esc(x.id)}" ${c && c.id === x.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.set.name)} ${esc(x.number)}/${esc(x.set.total ?? "?")}</option>`).join("");
+    body = `<span class="t">${c ? `<b>${esc(c.name)}</b>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.rarity || "No rarity listed")}` : `<b>Pocket ${i + 1}: ${cell.cands.length ? "skipped" : cell.number ? `read ${esc(cell.number)}, no match` : "nothing read"}</b>${cell.cands.length ? "Pick a card above or search to add it." : "Skipped. Search to add it."}`}</span>
+      ${cell.cands.length ? `<select data-bsel="${i}" aria-label="Card in pocket ${i + 1}">${opts}<option value="" ${c ? "" : "selected"}>Skip this pocket</option></select>` : ""}
+      <input type="search" data-bq="${i}" placeholder="Search name or number" value="${esc(cell.q)}" aria-label="Search for the card in pocket ${i + 1}" autocomplete="off" ${c && !cell.q ? "hidden" : ""}>
+      ${c && !cell.q ? `<span><button class="linkbtn" type="button" data-bfind="${i}">Not right? Search</button></span>` : ""}`;
+  }
+  return `<img class="bimg" src="${esc(cell.url)}" alt="Your photo of pocket ${i + 1}">${c ? `<span>${imgTag(cardImage(c), c.name, "bimg")}</span>` : `<span class="bimg ph">${cell.status === "done" ? "Skip" : ""}</span>`}<div class="bmatch">${body}</div>`;
+}
+function binderRow(i) {
+  const pg = binder.pages[binder.i], li = $(`#brow${i}`); if (!pg || !li) return;
+  const cell = pg.cells[i];
+  li.className = "brow" + (cell.status === "done" && !cell.chosen ? " skip" : "");
+  li.innerHTML = binderCellHtml(cell, i);
+  const sel = li.querySelector("[data-bsel]");
+  if (sel) sel.addEventListener("change", () => { cell.chosen = sel.value ? Cat.byId.get(sel.value) || null : null; binderRow(i); binderCountUpdate(); });
+  const q = li.querySelector("[data-bq]");
+  if (q) q.addEventListener("input", () => {
+    cell.q = q.value; cell.cands = q.value.trim() ? searchCatalogue(q.value, 8) : [];
+    cell.chosen = cell.cands[0] || null; binderRow(i); binderCountUpdate();
+    const nq = $(`#brow${i} [data-bq]`); if (nq) { nq.focus(); nq.setSelectionRange(nq.value.length, nq.value.length); }
+  });
+  const fb = li.querySelector("[data-bfind]");
+  if (fb) fb.addEventListener("click", () => { fb.parentElement.remove(); const inp = li.querySelector("[data-bq]"); inp.hidden = false; inp.focus(); });
+  binderCountUpdate();
+}
+function binderCountUpdate() { const b = $("#bAdd"); if (!b || b.dataset.busy) return; b.textContent = binderAddLabel(); b.disabled = !binderCount(); }
+function renderBinderList() { const pg = binder.pages[binder.i]; if (!pg) return; pg.cells.forEach((c, i) => binderRow(i)); }
+function placeBinderFrame() {
+  const fr = $("#bFrame"); if (!fr) return;
+  const f = BinderPrefs.frame, [rows, cols] = BINDER_GRIDS[BinderPrefs.pockets];
+  Object.assign(fr.style, { left: f.x * 100 + "%", top: f.y * 100 + "%", width: f.w * 100 + "%", height: f.h * 100 + "%", gridTemplateColumns: `repeat(${cols},1fr)`, gridTemplateRows: `repeat(${rows},1fr)` });
+}
+function binderReread() {
+  clearTimeout(binder.timer);
+  binder.timer = setTimeout(() => { const pg = binder.pages[binder.i]; if (pg && add.step === "binder") binderRead(pg); }, 700);
+}
+function binderPointer(stage) {
+  const fr = $("#bFrame"); let drag = null;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  fr.addEventListener("pointerdown", e => {
+    const r = stage.getBoundingClientRect();
+    drag = { id: e.pointerId, m: e.target.dataset.h || "move", sx: e.clientX, sy: e.clientY, f: { ...BinderPrefs.frame }, w: r.width, h: r.height, moved: false };
+    try { fr.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+  fr.addEventListener("pointermove", e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = (e.clientX - drag.sx) / drag.w, dy = (e.clientY - drag.sy) / drag.h, min = 0.15, m = drag.m;
+    let { x, y, w, h } = drag.f;
+    if (m === "move") { x = clamp(x + dx, 0, 1 - w); y = clamp(y + dy, 0, 1 - h); }
+    else {
+      if (m.includes("l")) { const nx = clamp(x + dx, 0, x + w - min); w += x - nx; x = nx; }
+      if (m.includes("r")) w = clamp(w + dx, min, 1 - x);
+      if (m.includes("t")) { const ny = clamp(y + dy, 0, y + h - min); h += y - ny; y = ny; }
+      if (m.includes("b")) h = clamp(h + dy, min, 1 - y);
+    }
+    drag.moved = true; BinderPrefs.frame = { x, y, w, h }; placeBinderFrame();
+  });
+  const end = e => { if (!drag || e.pointerId !== drag.id) return; const moved = drag.moved; drag = null; if (moved) { saveBinderPrefs(); binderHint("Grid moved. Reading the pockets again…"); binderReread(); } };
+  fr.addEventListener("pointerup", end); fr.addEventListener("pointercancel", end);
+}
+function renderBinder(b) {
+  const pg = binder.pages[binder.i];
+  if (!pg) {
+    b.innerHTML = `
+      <p class="muted" style="margin:0">${binder.added ? `Added ${binder.added} card${binder.added === 1 ? "" : "s"} from your binder. Photograph the next page, or you're done.` : "Photograph a binder page straight on, with the whole page in the picture."}</p>
+      <div class="pickers"><label class="picker full">${binder.added ? "Next binder page" : "Binder page"}<small>Take a photo or pick from your library</small><input id="binIn2" type="file" accept="image/*" multiple></label></div>
+      <div class="export-actions"><button class="btn primary" type="button" id="bDone">Done</button></div>`;
+    $("#binIn2").addEventListener("change", e => { if (e.target.files && e.target.files.length) binderStart(e.target.files); });
+    $("#bDone").addEventListener("click", () => $("#addSheet").close());
+    return;
+  }
+  const many = binder.pages.length > 1;
+  if (pg.state === "new") { b.innerHTML = `<p class="muted" id="bHint" role="status" style="margin:0"><span class="spinner" aria-hidden="true"></span> Opening the photo…</p>`; binderRead(pg); return; }
+  const cells = Array.from({ length: BINDER_GRIDS[BinderPrefs.pockets][0] * BINDER_GRIDS[BinderPrefs.pockets][1] }, (_, i) => `<i>${i + 1}</i>`).join("");
+  b.innerHTML = `
+    <div class="binder-top">
+      <p class="muted" id="bHint" role="status" style="margin:0">${esc(binder.msg || "Reading the pockets…")}</p>
+      <div class="export-actions">
+        <button class="btn primary" type="button" id="bAdd">${binderAddLabel()}</button>
+        ${many ? `<button class="btn" type="button" id="bSkip">${binder.i + 1 < binder.pages.length ? "Skip page" : "Skip"}</button>` : ""}
+        <button class="btn" type="button" id="bBack">Back</button>
+      </div>
+    </div>
+    ${add.err ? `<p class="add-err" role="alert">${esc(add.err)}</p>` : ""}
+    ${many ? `<p class="section-label" style="margin:0">Page ${binder.i + 1} of ${binder.pages.length}</p>` : ""}
+    <div class="binder-stage" id="bStage">${pg.url ? `<img src="${esc(pg.url)}" alt="Your binder page">` : ""}<div class="binder-frame" id="bFrame">${cells}<span class="bh" data-h="tl"></span><span class="bh" data-h="tr"></span><span class="bh" data-h="bl"></span><span class="bh" data-h="br"></span></div></div>
+    <div class="scan-ctl">
+      <label>Page type <select id="bGrid">${Object.entries(BINDER_GRIDS).map(([k, g]) => `<option value="${k}" ${k === BinderPrefs.pockets ? "selected" : ""}>${g[2]}</option>`).join("")}</select></label>
+      <p class="src" style="margin:0">Drag the yellow grid or its corners so each box covers one pocket. It reads again when you let go, and remembers the grid for next time.</p>
+    </div>
+    <ul class="binder-list" id="bList">${pg.cells.map((c, i) => `<li class="brow" id="brow${i}"></li>`).join("")}</ul>`;
+  placeBinderFrame(); binderPointer($("#bStage"));
+  renderBinderList(); binderCountUpdate();
+  $("#bGrid").addEventListener("change", e => { BinderPrefs.pockets = e.target.value; saveBinderPrefs(); binder.msg = "Reading the pockets again…"; binderRead(pg); });
+  $("#bBack").addEventListener("click", () => { binderClear(); add.err = ""; add.step = "pick"; renderAdd(); });
+  const sk = $("#bSkip"); if (sk) sk.addEventListener("click", () => binderNext());
+  $("#bAdd").addEventListener("click", () => binderAddPage($("#bAdd")));
+}
+function binderNext() {
+  binder.run++; clearTimeout(binder.timer);
+  const pg = binder.pages[binder.i];
+  if (pg) { pg.cv = null; for (const c of pg.cells) { c.cv = null; } }
+  binder.i++; binder.msg = ""; add.err = "";
+  if (binder.i >= binder.pages.length) { for (const p of binder.pages) { if (p.url) URL.revokeObjectURL(p.url); for (const c of p.cells) if (c.url) URL.revokeObjectURL(c.url); } binder.pages = []; binder.i = 0; }
+  renderAdd();
+}
+async function binderAddPage(btn) {
+  const pg = binder.pages[binder.i]; if (!pg) return;
+  const picks = pg.cells.filter(c => c.chosen);
+  if (!picks.length || btn.dataset.busy) return;
+  btn.dataset.busy = "1"; btn.disabled = true; btn.textContent = "Adding…";
+  binder.run++;
+  try {
+    const now = Date.now(), recs = [];
+    for (let i = 0; i < picks.length; i++) {
+      const cell = picks[i], c = cell.chosen;
+      const photo = cell.blob ? await Store.savePhoto(cell.blob) : null;
+      recs.push({ id: "card_" + uid(), ...cardFromCatalogue(c), finish: "normal", qty: 1, condition: null, photo, read: { name: "", number: cell.number || "", setCode: "", confidence: "binder page" }, addedAt: now + i, price: null });
+    }
+    await Store.putMany(recs);
+    binder.added += recs.length;
+    priceNew(recs);
+    binderNext();
+  } catch (e) {
+    delete btn.dataset.busy; btn.disabled = false; btn.textContent = binderAddLabel();
+    add.err = e && e.code === "quota_exceeded" ? "Your collection store is full." : "Those cards couldn't be saved. Try again.";
+    const er = $("#addBody .add-err"); if (er) er.textContent = add.err; else binderHint(add.err);
+  }
+}
+
 function resetAdd() { Object.assign(add, { blob: null, photoBlob: null, url: "", read: null, ocr: null, cands: [], chosen: null, finish: "normal", qty: 1, cond: null, step: "pick", prevStep: "review", err: "", status: "", searchQ: "", showSearch: false, cenBox: null }); }
 resetAdd();
 const CONDS = [["", "Not set"], ["9", "Near Mint, looks perfect (about 9)"], ["8", "Near Mint, tiny flaw (about 8)"], ["6", "Lightly played (about 6)"], ["4", "Moderately played (about 4)"], ["2", "Heavily played or damaged (about 2)"]];
 const condOptions = g => CONDS.map(([v, l]) => `<option value="${v}" ${String(g ?? "") === v ? "selected" : ""}>${l}</option>`).join("");
-function openAdd() { stopScan(); resetAdd(); renderAdd(); $("#addSheet").showModal(); }
-$("#addSheet").addEventListener("close", stopScan);
+function openAdd() { stopScan(); binderClear(); Object.assign(Scan, { skipKey: "", added: 0, lastName: "" }); resetAdd(); renderAdd(); $("#addSheet").showModal(); }
+$("#addSheet").addEventListener("close", () => { stopScan(); binderClear(); });
 function renderAdd() {
   const b = $("#addBody");
   const aiOn = AI.sample && AI.images;
@@ -1189,10 +1441,11 @@ function renderAdd() {
     });
     return;
   }
+  if (add.step === "binder") { renderBinder(b); return; }
   if (add.step === "scan") {
     b.innerHTML = `
       <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view. Tap to focus."></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div><span class="scan-focus" id="scanFocus" aria-hidden="true"></span></div>
-      <p class="muted" id="scanHint" role="status" style="margin:0">Starting the camera…</p>
+      <p class="muted" id="scanHint" role="status" style="margin:0">${Scan.skipKey ? esc(scanAddedMsg()) : "Starting the camera…"}</p>
       <div class="scan-ctl">
         <label>Frame size <input type="range" id="scanSize" min="30" max="100" step="1" value="${Math.round(ScanPrefs.size)}"></label>
         <label id="scanZoomRow" hidden>Camera zoom <input type="range" id="scanZoom"></label>
@@ -1201,8 +1454,8 @@ function renderAdd() {
       </div>
       <div class="export-actions">
         <button class="btn primary" type="button" id="scanSnap">Take photo now</button>
-        <button class="btn" type="button" id="scanTorch" aria-pressed="false">Flash off</button>
-        <button class="btn" type="button" id="scanBack">Back</button>
+        <button class="btn" type="button" id="scanTorch" aria-pressed="${Scan.torch}">${Scan.torch ? "Flash on" : "Flash off"}</button>
+        <button class="btn" type="button" id="scanBack">${Scan.added ? "Done" : "Back"}</button>
       </div>`;
     placeFrame(); scanPointer($("#scanBox"));
     $("#scanSize").addEventListener("input", e => { ScanPrefs.size = Number(e.target.value); placeFrame(); });
@@ -1230,11 +1483,11 @@ function renderAdd() {
       catch (err) { scanHintOnce("The flash couldn't be switched just now."); }
       btn.setAttribute("aria-pressed", String(Scan.torch)); btn.textContent = Scan.torch ? "Flash on" : "Flash off";
     });
-    $("#scanBack").addEventListener("click", () => { stopScan(); add.step = "pick"; renderAdd(); });
+    $("#scanBack").addEventListener("click", () => { stopScan(); if (Scan.added) { $("#addSheet").close(); return; } add.step = "pick"; renderAdd(); });
     return;
   }
   if (add.step === "pick") {
-    const live = scanUsable() && !aiOn;
+    const live = scanUsable() && !aiOn, binderOk = ocrUsable() && !aiOn;
     b.innerHTML = `
       <p class="muted" style="margin:0">${aiOn ? "Photograph the front of the card, flat and filling most of the frame. Claude reads the name, number and set, then checks condition." : ocrUsable() ? "Photograph the front of the card, flat, straight on and filling most of the frame. The app reads the collector number at the bottom to find it." : "Add a photo of the front, then find the card by name or number."}</p>
       ${add.err ? `<p class="add-err" role="alert">${esc(add.err)}</p>` : ""}
@@ -1242,11 +1495,13 @@ function renderAdd() {
         ${live ? `<button class="picker wide" type="button" id="scanBtn">Scan with camera<small>Hold the card up and the number is read live</small></button>` : ""}
         <label class="picker">Take photo<small>Camera</small><input id="camIn" type="file" accept="image/*" capture="environment"></label>
         <label class="picker">Choose photo<small>From your library</small><input id="libIn" type="file" accept="image/*"></label>
+        ${binderOk ? `<label class="picker full">Binder page<small>A whole page of cards in one photo</small><input id="binIn" type="file" accept="image/*" multiple></label>` : ""}
       </div>
       <div><button class="linkbtn" type="button" id="skipPhoto">Add without a photo</button></div>`;
     const onFile = e => { const f = e.target.files && e.target.files[0]; if (f) takePhoto(f); };
     $("#camIn").addEventListener("change", onFile); $("#libIn").addEventListener("change", onFile);
     if (live) $("#scanBtn").addEventListener("click", startScan);
+    if (binderOk) $("#binIn").addEventListener("change", e => { if (e.target.files && e.target.files.length) binderStart(e.target.files); });
     $("#skipPhoto").addEventListener("click", () => { add.step = "search"; renderAdd(); });
     return;
   }
@@ -1261,16 +1516,18 @@ function renderAdd() {
     else if (r.language && !/english/i.test(r.language)) statusHtml += `<span class="err">This looks like a ${esc(r.language)} card. The catalogue lists English cards, so pick the closest English printing.</span>`;
   } else if (add.ocr) {
     statusHtml = add.ocr.number
-      ? `<span class="line">Read <span class="mono">${esc(add.ocr.number)}</span> ${add.ocr.live ? "with the camera" : "from your photo"}</span><span class="read">${add.cands.length ? "Check it's the right card." : "No card has that number. Search below."}</span>`
+      ? `<span class="line">Read <span class="mono">${esc(add.ocr.number)}</span> ${add.ocr.live ? "with the camera" : "from your photo"}</span><span class="read">${add.cands.length ? "Check it's the right card." : "No card has that number. Search below."}</span>${add.ocr.live ? `<span><button class="btn small" type="button" id="rescanBtn">Scan again</button></span>` : ""}`
       : `<span class="line">Couldn't read the number</span><span class="read">${add.cands.length ? "These names showed up in the photo." : "Search below, or try a sharper, closer photo."}</span>`;
   } else if (add.photoBlob) statusHtml = `<span class="line">Photo added</span><span class="read">${aiOn ? "" : "Find the card below."}</span>`;
   if (add.err) statusHtml += `<span class="err">${esc(add.err)}</span>`;
 
   const candList = add.cands.length ? `<div><p class="section-label">${add.read || (add.ocr && !add.searchQ) ? "Best matches" : "Results"}</p><ul class="cands">${add.cands.map(c => `
-      <li><button class="cand" type="button" data-cand="${esc(c.id)}" aria-pressed="${add.chosen && add.chosen.id === c.id}">
+      <li class="cand-row"><button class="cand" type="button" data-cand="${esc(c.id)}" aria-pressed="${add.chosen && add.chosen.id === c.id}">
         <span class="thumb">${imgTag(cardImage(c), c.name)}</span>
         <span class="t"><b>${esc(c.name)}</b><span>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.rarity || "No rarity listed")}</span></span>
-        <span class="tick" aria-hidden="true"></span></button></li>`).join("")}</ul></div>` : (add.read && add.step !== "reading" ? `<p class="muted" style="margin:0">No catalogue match for that reading. Search below.</p>` : "");
+        <span class="tick" aria-hidden="true"></span></button>
+        <button class="btn ${add.chosen && add.chosen.id === c.id ? "primary " : ""}cand-add" type="button" data-addcand="${esc(c.id)}" aria-label="Add ${esc(c.name)}, ${esc(c.set.name)} ${esc(c.number)}">Add</button></li>`).join("")}</ul>
+      <p class="src" style="margin:6px 0 0">Add saves it now. To set finish, copies or condition first, pick the card and use the options below.</p></div>` : (add.read && add.step !== "reading" ? `<p class="muted" style="margin:0">No catalogue match for that reading. Search below.</p>` : "");
 
   const showSearch = add.step === "search" || (add.step === "review" && ((!add.read && !add.ocr) || !add.cands.length || add.showSearch));
   const searchHtml = add.step === "reading" ? "" : (showSearch
@@ -1299,12 +1556,14 @@ function renderAdd() {
   }
   const ss = $("#showSearch"); if (ss) ss.addEventListener("click", () => { add.showSearch = true; renderAdd(); $("#catQ") && $("#catQ").focus(); });
   b.querySelectorAll("[data-cand]").forEach(el => el.addEventListener("click", () => { add.chosen = Cat.byId.get(el.dataset.cand); renderAdd(); }));
+  b.querySelectorAll("[data-addcand]").forEach(el => el.addEventListener("click", () => { const c = Cat.byId.get(el.dataset.addcand); if (c) saveAdd(c, el); }));
   const fs = $("#finSel"); if (fs) fs.addEventListener("change", () => add.finish = fs.value);
   const qi = $("#qtyIn"); if (qi) qi.addEventListener("change", () => add.qty = Math.max(1, Math.min(999, parseInt(qi.value) || 1)));
   b.querySelectorAll("[data-q]").forEach(el => el.addEventListener("click", () => { add.qty = Math.max(1, Math.min(999, add.qty + parseInt(el.dataset.q))); $("#qtyIn").value = add.qty; }));
   const cs = $("#condSel"); if (cs) cs.addEventListener("change", () => { add.cond = { ...(add.cond || {}), grade: cs.value ? Number(cs.value) : null, source: "manual" }; renderAdd(); });
   const cb = $("#cenBtn"); if (cb) cb.addEventListener("click", () => { add.prevStep = add.step; add.step = "centering"; renderAdd(); });
-  const sv = $("#saveCard"); if (sv) sv.addEventListener("click", saveAdd);
+  const sv = $("#saveCard"); if (sv) sv.addEventListener("click", () => saveAdd(add.chosen, sv));
+  const rs = $("#rescanBtn"); if (rs) rs.addEventListener("click", () => { if (add.url) URL.revokeObjectURL(add.url); resetAdd(); startScan(); });
 }
 function renderCands() {
   /* re-render only the results part while typing, keeping focus in the search box */
@@ -1357,18 +1616,29 @@ async function takePhoto(file) {
     add.step = "review"; renderAdd();
   } else { add.step = "search"; renderAdd(); }
 }
-async function saveAdd() {
-  const c = add.chosen; if (!c) return;
-  const btn = $("#saveCard"); btn.disabled = true; btn.textContent = "Saving…";
+async function saveAdd(c, btn) {
+  if (!c || add.saving) return;
+  add.saving = true; add.chosen = c;
+  const label = btn.textContent;
+  $("#addBody").querySelectorAll("#saveCard,[data-addcand]").forEach(x => x.disabled = true);
+  btn.textContent = "Saving…";
   try {
     const photo = add.photoBlob ? await Store.savePhoto(add.photoBlob) : null;
     const rec = { id: "card_" + uid(), ...cardFromCatalogue(c), finish: add.finish, qty: add.qty, condition: add.cond || null, photo, read: add.read ? { name: add.read.name || "", number: add.read.number || "", setCode: add.read.setCode || "", confidence: add.read.confidence || "" } : null, addedAt: Date.now(), price: null };
     await Store.put(rec);
+    add.saving = false;
+    priceNew([rec]);
+    if (add.ocr && add.ocr.live && scanUsable()) {
+      /* straight back to the camera for the next card */
+      Object.assign(Scan, { skipKey: add.ocr.key || "", added: Scan.added + 1, lastName: c.name });
+      if (add.url) URL.revokeObjectURL(add.url);
+      resetAdd(); startScan();
+      return;
+    }
     $("#addSheet").close();
     toast(`Added ${c.name}`);
-    refreshPrices(false, [rec]).catch(() => {});
   } catch (e) {
-    btn.disabled = false; btn.textContent = "Add to collection";
+    add.saving = false; btn.textContent = label;
     add.err = e && e.code === "quota_exceeded" ? "Your collection store is full." : "That card couldn't be saved. Try again."; renderAdd();
   }
 }
