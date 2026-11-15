@@ -236,6 +236,33 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
 .gcard.t-ultra .grar{background:rgb(150 100 230 / .45)}.gcard.t-secret .grar{background:rgb(200 150 30 / .5)}.gcard.t-rare .grar{background:rgb(70 120 220 / .45)}
 .gbadge{position:absolute;top:8px;font:700 11px/1 var(--f-body);padding:4px 7px;border-radius:999px;background:rgb(8 10 14 / .78);color:#fff}
 .gbadge.qty{left:8px}.gbadge.grade{right:8px}
+/* Both pictures: your photo beside the catalogue's */
+.row.duo{grid-template-columns:96px 1fr auto}
+.thumb.duo{width:96px;aspect-ratio:auto;display:grid;grid-template-columns:1fr 1fr;gap:4px;background:none;overflow:visible;border-radius:0}
+.thumb.duo>span{aspect-ratio:63/88;border-radius:5px;overflow:hidden;background:var(--sunk);display:block}
+.thumb.duo>span img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb.duo>.nophoto{border:1.5px dashed var(--line);background:none;display:grid;place-items:center;font-size:9px;line-height:1.1;text-align:center;color:var(--muted);padding:2px}
+.dk-line:has(> .thumb.duo){grid-template-columns:72px 1fr auto}.dk-line .thumb.duo{width:72px}
+.sug:has(> .thumb.duo),.cand:has(> .thumb.duo){grid-template-columns:88px 1fr auto}.sug .thumb.duo,.cand .thumb.duo{width:88px}
+.gallery.duo{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+@media (min-width:620px){.gallery.duo{grid-template-columns:repeat(auto-fill,minmax(330px,1fr))}}
+.gallery.duo .gbtn{aspect-ratio:130/88;border-radius:3%/3.3%}
+.gallery.duo .gimg{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--surface)}
+.gside{position:relative;overflow:hidden;background:var(--sunk);border-radius:4.6%/3.3%}
+.gside .ph{font-size:12px}
+
+/* Gallery: arranging cards by hand */
+.gtools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:14px 0 -2px}
+.gtools p{margin:0;font-size:13px;color:var(--muted);flex:1 1 220px}
+.gallery.arranging .gbtn{cursor:grab;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.gallery.arranging img{pointer-events:none;-webkit-user-drag:none}
+.gallery.arranging .gsheen,.gallery.arranging .gbadge{display:none}
+.gcard.dragging{position:relative;z-index:5;pointer-events:none;transition:none}
+.gcard.dragging .gbtn{cursor:grabbing;transform:scale(1.04);box-shadow:0 22px 44px rgb(0 0 0 / .4)}
+.gmove{position:absolute;top:8px;left:0;right:0;display:flex;justify-content:space-between;padding:0 8px;pointer-events:none}
+.gmove button{pointer-events:auto;width:38px;height:38px;border-radius:999px;border:0;background:rgb(8 10 14 / .8);color:#fff;font:700 20px/1 var(--f-body);cursor:pointer;display:grid;place-items:center}
+.gmove button:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.gmove button:disabled{opacity:.3;cursor:default}
 @media (prefers-reduced-motion:reduce){.gcard{opacity:1;transform:none;transition:none}.gbtn,.gov{transition:none;transform:none}}
 
 /* Decks */
@@ -305,11 +332,12 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
     <div class="field"><label for="fSet">Set</label><select id="fSet"><option value="">All sets</option></select></div>
     <div class="field"><label for="fRarity">Rarity</label><select id="fRarity"><option value="">All rarities</option></select></div>
     <div class="field"><label for="fSort">Sort</label>
-      <select id="fSort"><option value="value">Highest value</option><option value="recent">Recently added</option><option value="set">Set and number</option><option value="name">Name</option></select></div>
-    <div class="field"><label for="fPics">Pictures</label><select id="fPics"><option value="mine">My photos</option><option value="catalogue">Catalogue images</option></select></div>
+      <select id="fSort"><option value="value">Highest value</option><option value="low">Lowest value</option><option value="recent">Recently added</option><option value="rarity">Rarest first</option><option value="grade">Best condition</option><option value="set">Set and number</option><option value="name">Name</option><option value="manual">My order</option></select></div>
+    <div class="field"><label for="fPics">Pictures</label><select id="fPics"><option value="both">Both</option><option value="mine">My photos</option><option value="catalogue">Catalogue images</option></select></div>
     <div class="exports" id="exports"><span class="k">Download</span><button class="btn small" type="button" id="dlCsv">Spreadsheet (CSV)</button><button class="btn small" type="button" id="dlImg">Collection image</button><span class="muted" id="dlNote" role="status"></span></div>
   </div>
   <ul class="list" id="list"></ul>
+  <div class="gtools" id="gtools" hidden></div>
   <ul class="gallery" id="gallery" hidden></ul>
   <section class="decks" id="decks" hidden aria-label="Decks"></section>
   <div class="empty" id="empty" hidden>
@@ -677,6 +705,13 @@ const Store = {
     if (this.mode === "local") await this.tx("cards", "readwrite", s => s.put(full));
     this.emit();
   },
+  async putMany(cards) {
+    const items = cards.map(card => { const clean = JSON.parse(JSON.stringify(card)); const id = clean.id; delete clean.id; return [id, clean]; });
+    if (this.mode === "cloud") { await Promise.all(items.map(([id, clean]) => this.col.doc(id).set(clean))); return; }
+    for (const [id, clean] of items) { const full = { ...clean, id }; const i = this.cards.findIndex(c => c.id === id); if (i >= 0) this.cards[i] = full; else this.cards.push(full); }
+    if (this.mode === "local") await this.tx("cards", "readwrite", st => { for (const [id, clean] of items) st.put({ ...clean, id }); });
+    this.emit();
+  },
   async putDeck(deck) {
     const clean = JSON.parse(JSON.stringify(deck)); const id = clean.id; delete clean.id;
     if (this.mode === "cloud") { await this.col.doc(id).set(clean); return; }
@@ -812,7 +847,7 @@ function imgTag(src, alt, cls = "") {
 }
 
 /* ---------- collection view ---------- */
-const view = { q: "", set: "", rarity: "", sort: "value", tab: "binder" };
+const view = { q: "", set: "", rarity: "", sort: "value", tab: "binder", arranging: false, focusAfter: null };
 const photoCache = new Map();
 function cardFromCatalogue(c) {
   return { cardId: c.id, name: c.name, number: c.number, setId: c.set.id, setName: c.set.name, setCode: c.set.code, printedTotal: c.set.total, series: c.set.series, released: c.set.released, rarity: c.rarity || "", supertype: c.supertype || "" };
@@ -840,31 +875,50 @@ function visibleRows() {
   const q = norm(view.q);
   const rows = Store.cards.filter(c => (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) &&
     (!q || (norm(c.name) + " " + norm(c.setName) + " " + norm(c.setCode) + " " + norm(c.number)).includes(q)));
-  const val = c => (pickPrice(c) || { value: -1 }).value;
-  const cmp = {
-    value: (a, b) => val(b) - val(a),
-    recent: (a, b) => (b.addedAt || 0) - (a.addedAt || 0),
-    set: (a, b) => String(b.released).localeCompare(String(a.released)) || (parseInt(a.number) || 0) - (parseInt(b.number) || 0),
-    name: (a, b) => a.name.localeCompare(b.name)
-  }[view.sort] || (() => 0);
-  return rows.sort(cmp);
+  return rows.sort(SORTS[view.sort] || SORTS.value);
+}
+/* sort presets, plus "manual": the order you arranged by hand (cards added since then come first, newest first) */
+const sortVal = c => (pickPrice(c) || { value: -1 }).value;
+const sortGrade = c => (c.condition && c.condition.grade != null && c.condition.grade !== "") ? Number(c.condition.grade) : -1;
+const TIER_RANK = { secret: 4, ultra: 3, rare: 2, common: 1 };
+const manualPos = c => (typeof c.pos === "number" ? c.pos : null);
+const SORTS = {
+  value: (a, b) => sortVal(b) - sortVal(a),
+  low: (a, b) => { const va = sortVal(a), vb = sortVal(b); if ((va < 0) !== (vb < 0)) return va < 0 ? 1 : -1; return va - vb; },
+  recent: (a, b) => (b.addedAt || 0) - (a.addedAt || 0),
+  rarity: (a, b) => (TIER_RANK[tier(b.rarity)] || 0) - (TIER_RANK[tier(a.rarity)] || 0) || sortVal(b) - sortVal(a),
+  grade: (a, b) => sortGrade(b) - sortGrade(a) || sortVal(b) - sortVal(a),
+  set: (a, b) => String(b.released).localeCompare(String(a.released)) || (parseInt(a.number) || 0) - (parseInt(b.number) || 0),
+  name: (a, b) => a.name.localeCompare(b.name),
+  manual: (a, b) => { const pa = manualPos(a), pb = manualPos(b); if (pa == null && pb == null) return (b.addedAt || 0) - (a.addedAt || 0); if (pa == null) return -1; if (pb == null) return 1; return pa - pb; }
+};
+function setSort(v) { view.sort = v; $("#fSort").value = v; try { localStorage.setItem("pokelab-sort", v); } catch (x) {} }
+/* save a new order for the cards on screen; cards your filters hide keep their places */
+async function saveManualOrder(visibleIds) {
+  const byId = new Map(Store.cards.map(c => [c.id, c])); const vis = new Set(visibleIds);
+  let k = 0; const merged = [...Store.cards].sort(SORTS.manual).map(c => vis.has(c.id) ? byId.get(visibleIds[k++]) : c);
+  const changed = merged.map((c, i) => (c && c.pos !== i ? { ...c, pos: i } : null)).filter(Boolean);
+  if (changed.length) await Store.putMany(changed); else renderList();
 }
 async function renderList() {
   const cards = Store.cards;
   renderTotals(cards); renderFilters(cards);
   const has = cards.length > 0; const tab = view.tab;
-  if (tab === "decks") { $("#filters").hidden = true; $("#empty").hidden = true; $("#fab").hidden = true; $("#list").hidden = true; $("#gallery").hidden = true; $("#decks").hidden = false; return renderDecks(); }
+  if (tab === "decks") { view.arranging = false; $("#gtools").hidden = true; $("#filters").hidden = true; $("#empty").hidden = true; $("#fab").hidden = true; $("#list").hidden = true; $("#gallery").hidden = true; $("#decks").hidden = false; return renderDecks(); }
   $("#decks").hidden = true; $("#list").hidden = tab !== "binder"; $("#gallery").hidden = tab !== "gallery";
+  if (tab !== "gallery") view.arranging = false;
+  $("#gtools").hidden = tab !== "gallery" || !has;
   $("#filters").hidden = !has; $("#empty").hidden = has; $("#fab").hidden = !has;
   const rows = visibleRows();
   if (tab === "gallery") return renderGallery(rows);
   const list = $("#list");
   if (has && !rows.length) { list.innerHTML = `<li class="muted" style="padding:16px 4px">No cards match these filters.</li>`; return; }
+  const both = Prefs.pics === "both";
   list.innerHTML = rows.map(c => {
     const p = pickPrice(c);
     const g = c.condition && c.condition.grade;
-    return `<li><button class="row" type="button" data-open="${esc(c.id)}">
-      <span class="thumb" data-photo="${esc(c.id)}"></span>
+    return `<li><button class="row${both ? " duo" : ""}" type="button" data-open="${esc(c.id)}">
+      <span class="thumb${both ? " duo" : ""}" data-photo="${esc(c.id)}"></span>
       <span class="main">
         <span class="name">${esc(c.name)}${(c.qty || 1) > 1 ? ` <span class="muted">×${c.qty}</span>` : ""}</span>
         <span class="setline">${esc(c.setName)} · <span class="mono">${esc(c.setCode || c.setId)} ${esc(c.number)}/${esc(c.printedTotal || "?")}</span></span>
@@ -875,7 +929,8 @@ async function renderList() {
   }).join("");
   for (const c of rows) {
     const el = list.querySelector(`[data-photo="${CSS.escape(c.id)}"]`); if (!el) continue;
-    el.innerHTML = picTag(await cardPicture(c, false), c.name);
+    if (both) { const cat = Cat.byId.get(c.cardId); el.innerHTML = duoThumb(await photoFor(c), cat ? cardImage(cat) : "", "No photo"); }
+    else el.innerHTML = picTag(await cardPicture(c, false), c.name);
   }
 }
 
@@ -1199,16 +1254,27 @@ async function renderDetail() {
 }
 
 /* ---------- picture preference: your photos or the catalogue's ---------- */
-const Prefs = { pics: "mine", stdMarks: "HIJ" };
-try { Prefs.pics = localStorage.getItem("pokelab-pics") === "catalogue" ? "catalogue" : "mine"; } catch (x) {}
+const Prefs = { pics: "both", stdMarks: "HIJ" };
+try { const v = localStorage.getItem("pokelab-pics2"); if (["both", "mine", "catalogue"].includes(v)) Prefs.pics = v; } catch (x) {}
 try { const m = localStorage.getItem("pokelab-std"); if (m && /^[A-Z]{1,6}$/.test(m)) Prefs.stdMarks = m; } catch (x) {}
+async function photoFor(c) {
+  let photo = photoCache.get(c.id); if (photo === undefined) { photo = await Store.photoURL(c); photoCache.set(c.id, photo); }
+  return photo;
+}
+async function warmPhotos() { await Promise.all(Store.cards.filter(c => c.photo && !photoCache.has(c.id)).map(c => photoFor(c).catch(() => ""))); }
 async function cardPicture(c, large) {
   const cat = Cat.byId.get(c.cardId);
-  let photo = photoCache.get(c.id); if (photo === undefined) { photo = await Store.photoURL(c); photoCache.set(c.id, photo); }
+  const photo = await photoFor(c);
   const catalogue = cat ? cardImage(cat, large) : "";
   if (Prefs.pics === "catalogue") return { src: catalogue || photo, alt: catalogue ? photo : "" };
-  return { src: photo || catalogue, alt: photo ? "" : "" };
+  return { src: photo || catalogue, alt: "" };
 }
+/* two small pictures side by side: your photo, then the catalogue's */
+function duoThumb(photo, catalogue, noPhotoText) {
+  const im = src => `<img src="${esc(src)}" alt="" loading="lazy" draggable="false" data-fail="remove">`;
+  return (photo ? `<span>${im(photo)}</span>` : `<span class="nophoto">${esc(noPhotoText)}</span>`) + `<span>${catalogue ? im(catalogue) : ""}</span>`;
+}
+const gside = (src, fallback) => `<span class="gside">${src ? `<img src="${esc(src)}" alt="" loading="lazy" draggable="false" data-fail="remove">` : `<span class="ph">${esc(fallback)}</span>`}</span>`;
 function picTag(pic, alt) {
   if (!pic.src) return "";
   return `<img src="${esc(pic.src)}" alt="${esc(alt)}" loading="lazy" data-fail="remove"${pic.alt ? ` data-alt="${esc(pic.alt)}"` : ""}>`;
@@ -1218,15 +1284,28 @@ function picTag(pic, alt) {
 const reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const canHover = window.matchMedia && matchMedia("(hover: hover) and (pointer: fine)").matches;
 let galObserver = null;
+function renderGTools(rows) {
+  const t = $("#gtools"); const hidden = rows.length < Store.cards.length;
+  t.innerHTML = view.arranging
+    ? `<p>${canHover ? "Drag a card to move it." : "Press and hold a card, then drag it."} The arrows move it one place.${hidden ? " Cards your filters hide keep their places." : ""}</p><button class="btn small primary" type="button" id="gArrDone">Done</button>`
+    : `<p>${view.sort === "manual" ? "Showing your own order." : "Sort with the presets above, or put the cards in your own order."}</p><button class="btn small" type="button" id="gArr"${rows.length < 2 ? " disabled" : ""}>Arrange cards</button>`;
+}
 async function renderGallery(rows) {
   const g = $("#gallery");
+  const both = Prefs.pics === "both", arr = view.arranging;
+  g.classList.toggle("duo", both); g.classList.toggle("arranging", arr);
+  renderGTools(rows);
   if (!rows.length) { g.innerHTML = Store.cards.length ? `<li class="muted" style="grid-column:1/-1;padding:16px 4px">No cards match these filters.</li>` : ""; return; }
+  const prior = new Map([...g.querySelectorAll("[data-gimg]")].map(el => [el.dataset.gimg + (el.dataset.duo || ""), el.innerHTML]));
+  const seen = new Set([...g.querySelectorAll(".gcard.in")].map(el => el.dataset.id));
   g.innerHTML = rows.map((c, i) => {
     const p = pickPrice(c); const g8 = c.condition && c.condition.grade; const q = c.qty || 1;
     const label = `${c.name}, ${c.setName} ${c.number}${p ? ", " + usd(p.value) : ""}${c.rarity ? ", " + c.rarity : ""}`;
-    return `<li class="gcard t-${tier(c.rarity)}" style="--i:${i % 8}">
-      <button class="gbtn" type="button" data-open="${esc(c.id)}" aria-label="${esc(label)}">
-        <span class="gimg" data-gimg="${esc(c.id)}"><span class="ph">${esc(c.name)}</span></span>
+    const tag = arr ? "div" : "button"; const key = c.id + (both ? "1" : "");
+    const moves = arr ? `<span class="gmove"><button type="button" data-mv="-1" aria-label="Move ${esc(c.name)} earlier"${i === 0 ? " disabled" : ""}>‹</button><button type="button" data-mv="1" aria-label="Move ${esc(c.name)} later"${i === rows.length - 1 ? " disabled" : ""}>›</button></span>` : "";
+    return `<li class="gcard t-${tier(c.rarity)}" data-id="${esc(c.id)}" style="--i:${i % 8}">
+      <${tag} class="gbtn" ${arr ? `role="group"` : `type="button" data-open="${esc(c.id)}"`} aria-label="${esc(label)}">
+        <span class="gimg" data-gimg="${esc(c.id)}"${both ? ` data-duo="1"` : ""}>${prior.get(key) || `<span class="ph">${esc(c.name)}</span>`}</span>${moves}
         <span class="gsheen" aria-hidden="true"></span>
         ${q > 1 ? `<span class="gbadge qty" aria-hidden="true">×${q}</span>` : ""}
         ${g8 ? `<span class="gbadge grade" aria-hidden="true">Est. ${esc(g8)}</span>` : ""}
@@ -1235,26 +1314,135 @@ async function renderGallery(rows) {
           <span class="gset">${esc(c.setCode || c.setId)} ${esc(c.number)}/${esc(c.printedTotal || "?")} · ${esc(c.setName)}</span>
           <span class="grow"><span class="gval${p ? "" : " none"}">${p ? usd(p.value) : "No price"}</span>${c.rarity ? `<span class="grar">${esc(c.rarity)}</span>` : ""}</span>
         </span>
-      </button></li>`;
+      </${tag}></li>`;
   }).join("");
   if (galObserver) galObserver.disconnect();
   const items = [...g.querySelectorAll(".gcard")];
-  if (reduceMotion || !("IntersectionObserver" in window)) items.forEach(el => el.classList.add("in"));
+  if (view.focusAfter) {
+    const f = view.focusAfter; view.focusAfter = null;
+    const li = g.querySelector(`.gcard[data-id="${CSS.escape(f.id)}"]`);
+    const b = li && (li.querySelector(`[data-mv="${f.mv}"]:not(:disabled)`) || li.querySelector("[data-mv]:not(:disabled)"));
+    if (b) b.focus();
+  }
+  if (reduceMotion || arr || !("IntersectionObserver" in window)) items.forEach(el => el.classList.add("in"));
   else {
     galObserver = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { e.target.classList.add("in"); galObserver.unobserve(e.target); } }, { rootMargin: "0px 0px -6% 0px" });
-    items.forEach(el => galObserver.observe(el));
+    items.forEach(el => { if (seen.has(el.dataset.id)) { el.style.transition = "none"; el.classList.add("in"); el.offsetWidth; el.style.transition = ""; } else galObserver.observe(el); });
   }
   for (const c of rows) {
     const el = g.querySelector(`[data-gimg="${CSS.escape(c.id)}"]`); if (!el) continue;
-    const pic = await cardPicture(c, true);
-    if (pic.src) el.innerHTML = picTag(pic, "") + "";
+    if (both) {
+      const cat = Cat.byId.get(c.cardId);
+      const html = gside(await photoFor(c), "No photo yet") + gside(cat ? cardImage(cat, true) : "", c.name);
+      if (el.innerHTML !== html) el.innerHTML = html;
+    } else {
+      const pic = await cardPicture(c, true);
+      if (pic.src) { const html = picTag(pic, ""); if (el.innerHTML !== html) el.innerHTML = html; }
+    }
   }
+}
+
+/* arranging the gallery by hand: drag with a mouse, press and hold then drag on a touch screen, or use the arrows */
+const Arr = { el: null, pid: null, touch: false, active: false, startX: 0, startY: 0, lastX: 0, lastY: 0, grabX: 0, grabY: 0, tx: 0, ty: 0, hold: 0, raf: 0 };
+function flipFrom(x, dx, dy) {
+  x.dataset.anim = "1"; x.style.transition = "none"; x.style.transform = `translate(${dx}px,${dy}px)`; x.offsetWidth;
+  x.style.transition = "transform .22s cubic-bezier(.2,.8,.2,1)"; x.style.transform = "";
+  let done = false; const fin = () => { if (done) return; done = true; x.style.transition = ""; delete x.dataset.anim; };
+  x.addEventListener("transitionend", fin, { once: true }); setTimeout(fin, 320);
+}
+function dragTo() {
+  const li = Arr.el, g = $("#gallery"); if (!li) return;
+  const under = document.elementFromPoint(Arr.lastX, Arr.lastY);
+  const t = under && under.closest(".gcard");
+  if (t && t !== li && t.parentNode === g && !t.dataset.anim) {
+    const items = [...g.children]; const from = items.indexOf(li), to = items.indexOf(t);
+    const before = reduceMotion ? null : new Map(items.map(x => [x, x.getBoundingClientRect()]));
+    g.insertBefore(li, from < to ? t.nextSibling : t);
+    if (before) for (const x of items) { if (x === li) continue; const a = before.get(x), b = x.getBoundingClientRect(); if (a.left !== b.left || a.top !== b.top) flipFrom(x, a.left - b.left, a.top - b.top); }
+  }
+  const r = li.getBoundingClientRect();
+  Arr.tx = Arr.lastX - Arr.grabX - (r.left - Arr.tx); Arr.ty = Arr.lastY - Arr.grabY - (r.top - Arr.ty);
+  li.style.transform = `translate(${Arr.tx}px,${Arr.ty}px)`;
+}
+function dragScroll() {
+  if (!Arr.active) return;
+  const m = 70, y = Arr.lastY, h = innerHeight;
+  const v = y < m ? -Math.ceil((m - y) / 5) : y > h - m ? Math.ceil((y - (h - m)) / 5) : 0;
+  if (v) { scrollBy(0, v); dragTo(); }
+  Arr.raf = requestAnimationFrame(dragScroll);
+}
+function beginDrag() {
+  clearTimeout(Arr.hold); const li = Arr.el; if (!li || Arr.active) return;
+  const r = li.getBoundingClientRect();
+  Object.assign(Arr, { active: true, grabX: Arr.lastX - r.left, grabY: Arr.lastY - r.top, tx: 0, ty: 0 });
+  li.style.transition = "none"; li.classList.add("dragging");
+  if (Arr.touch && navigator.vibrate) { try { navigator.vibrate(10); } catch (x) {} }
+  Arr.raf = requestAnimationFrame(dragScroll);
+}
+function endDrag(commit) {
+  clearTimeout(Arr.hold); cancelAnimationFrame(Arr.raf);
+  const li = Arr.el, was = Arr.active; Object.assign(Arr, { el: null, pid: null, active: false });
+  if (!li || !was) return;
+  li.classList.remove("dragging");
+  if (reduceMotion) { li.style.transition = ""; li.style.transform = ""; }
+  else { li.style.transition = "transform .2s cubic-bezier(.2,.8,.2,1)"; li.style.transform = ""; setTimeout(() => { li.style.transition = ""; }, 240); }
+  if (commit) {
+    const ids = [...$("#gallery").querySelectorAll(".gcard")].map(x => x.dataset.id);
+    setTimeout(() => saveManualOrder(ids).catch(() => toast("That order couldn't be saved. Try again.")), reduceMotion ? 0 : 230);
+  }
+}
+async function moveBy(id, d) {
+  const ids = [...$("#gallery").querySelectorAll(".gcard")].map(x => x.dataset.id);
+  const i = ids.indexOf(id), j = i + d; if (i < 0 || j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  view.focusAfter = { id, mv: d };
+  await saveManualOrder(ids);
+}
+async function startArrange() {
+  if (view.sort !== "manual") {
+    const fresh = !Store.cards.some(c => typeof c.pos === "number");
+    const from = SORTS[view.sort] || SORTS.value;
+    setSort("manual"); view.arranging = true;
+    if (fresh) { await Store.putMany([...Store.cards].sort(from).map((c, i) => ({ ...c, pos: i }))); return; }
+  }
+  view.arranging = true; renderList();
+}
+function wireArrange() {
+  const g = $("#gallery");
+  g.addEventListener("pointerdown", e => {
+    if (!view.arranging || e.button > 0 || Arr.el || e.target.closest(".gmove")) return;
+    const li = e.target.closest(".gcard"); if (!li || !li.dataset.id) return;
+    Object.assign(Arr, { el: li, pid: e.pointerId, touch: e.pointerType === "touch", active: false, startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY });
+    if (Arr.touch) Arr.hold = setTimeout(beginDrag, 300);
+    else e.preventDefault();
+  });
+  addEventListener("pointermove", e => {
+    if (!Arr.el || e.pointerId !== Arr.pid) return;
+    Arr.lastX = e.clientX; Arr.lastY = e.clientY;
+    if (!Arr.active) {
+      const d = Math.hypot(e.clientX - Arr.startX, e.clientY - Arr.startY);
+      if (Arr.touch) { if (d > 10) endDrag(false); return; }
+      if (d < 6) return;
+      beginDrag();
+    }
+    e.preventDefault(); dragTo();
+  }, { passive: false });
+  addEventListener("pointerup", e => { if (Arr.el && e.pointerId === Arr.pid) endDrag(true); });
+  addEventListener("pointercancel", e => { if (Arr.el && e.pointerId === Arr.pid) endDrag(Arr.active); });
+  document.addEventListener("touchmove", e => { if (Arr.active) e.preventDefault(); }, { passive: false });
+  g.addEventListener("contextmenu", e => { if (view.arranging) e.preventDefault(); });
+  g.addEventListener("click", e => { const b = e.target.closest("[data-mv]"); if (!b || !view.arranging) return; const li = b.closest(".gcard"); if (li) moveBy(li.dataset.id, Number(b.dataset.mv)).catch(() => toast("That order couldn't be saved. Try again.")); });
+  $("#gtools").addEventListener("click", e => {
+    if (e.target.closest("#gArr")) startArrange().catch(() => toast("That order couldn't be saved. Try again."));
+    else if (e.target.closest("#gArrDone")) { view.arranging = false; renderList(); }
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && view.arranging && !document.querySelector("dialog[open]")) { endDrag(false); view.arranging = false; renderList(); } });
 }
 function wireGalleryTilt() {
   const g = $("#gallery");
   if (reduceMotion || !canHover) return;
   g.addEventListener("pointermove", e => {
-    const b = e.target.closest(".gbtn"); if (!b) return;
+    const b = e.target.closest(".gbtn"); if (!b || view.arranging) return;
     const r = b.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
     b.classList.add("tilting");
     b.style.setProperty("--ry", ((x - .5) * 14).toFixed(2) + "deg"); b.style.setProperty("--rx", ((.5 - y) * 14).toFixed(2) + "deg");
@@ -1534,13 +1722,26 @@ function searchPlayable(q, fmt, opts = {}) {
   }
   return out.sort((a, b) => b[0] - a[0]).slice(0, 24).map(x => x[1]);
 }
-function thumbFor(r) { const src = cardImage(r.cat); return src ? `<img src="${esc(src)}" alt="" loading="lazy" data-fail="remove">` : ""; }
+/* deck card pictures: the catalogue's, with your own photo when you own that card */
+function thumbFor(r) {
+  const src = cardImage(r.cat);
+  let mine = null, photo = "";
+  if (Prefs.pics !== "catalogue") {
+    mine = Store.cards.find(c => c.cardId === r.id && c.photo) || Store.cards.find(c => c.cardId === r.id)
+      || Store.cards.find(c => { const d = DK.byId.get(c.cardId); return d && d.key === r.key && c.photo; });
+    photo = mine ? photoCache.get(mine.id) || "" : "";
+  }
+  if (Prefs.pics === "both") return `<span class="thumb duo">${duoThumb(photo, src, mine ? "No photo" : "")}</span>`;
+  const s = Prefs.pics === "mine" && photo ? photo : src;
+  return `<span class="thumb">${s ? `<img src="${esc(s)}" alt="" loading="lazy" data-fail="remove">` : ""}</span>`;
+}
 async function renderDecks() {
   const host = $("#decks");
   if (!DK.ready) {
     host.innerHTML = `<p class="muted"><span class="spinner"></span>Loading card rules…</p>`;
     try { await loadDeckData(); } catch (e) { host.innerHTML = `<p class="err">The deck builder's card data didn't load. Reopen the page to try again.</p>`; return; }
   }
+  if (Prefs.pics !== "catalogue") await warmPhotos();
   const deck = dv.open && Store.decks.find(d => d.id === dv.open);
   if (!deck) { dv.open = null; return renderDeckList(host); }
   return renderDeckEditor(host, deck);
@@ -1557,7 +1758,7 @@ function renderDeckList(host) {
         <div class="field"><label for="arF">Format</label><select id="arF"><option value="standard" ${dv.fmt === "standard" ? "selected" : ""}>Standard</option><option value="expanded" ${dv.fmt === "expanded" ? "selected" : ""}>Expanded</option></select></div>
       </div>
       ${!dv.aroundQ ? `<p class="muted" style="margin:0">${res.length ? "Pokémon you own that are legal in " + fmtName(dv.fmt) + ":" : "Search for a Pokémon to build around."}</p>` : ""}
-      <ul class="cands">${res.map(k => { const r = repPrint(k); return `<li><button class="cand" type="button" data-around="${esc(k)}"><span class="thumb">${thumbFor(r)}</span><span class="t"><b>${esc(r.name)}</b><span>${esc(r.subs.filter(s => /Basic|Stage|ex|Mega|V/.test(s)).join(" · "))} · ${r.hp} HP · ${esc(r.atk.map(a => a[0] + (a[2] ? " " + a[2] : "")).join(", "))}${owned.get(k) ? " · you have " + owned.get(k) : ""}</span></span><span></span></button></li>`; }).join("")}</ul>
+      <ul class="cands">${res.map(k => { const r = repPrint(k); return `<li><button class="cand" type="button" data-around="${esc(k)}">${thumbFor(r)}<span class="t"><b>${esc(r.name)}</b><span>${esc(r.subs.filter(s => /Basic|Stage|ex|Mega|V/.test(s)).join(" · "))} · ${r.hp} HP · ${esc(r.atk.map(a => a[0] + (a[2] ? " " + a[2] : "")).join(", "))}${owned.get(k) ? " · you have " + owned.get(k) : ""}</span></span><span></span></button></li>`; }).join("")}</ul>
       <div><button class="btn small ghost" type="button" id="arCancel">Cancel</button></div>
     </div>`;
   }
@@ -1606,7 +1807,7 @@ async function renderDeckEditor(host, deck) {
   const results = dv.q || dv.ownedOnly ? searchPlayable(dv.q, deck.format, { ownedOnly: dv.ownedOnly }) : [];
   const lineHtml = l => {
     const p = priceOf(l.id); const have = owned.get(l.row.key) || 0;
-    return `<div class="dk-line"><span class="thumb">${thumbFor(l.row)}</span>
+    return `<div class="dk-line">${thumbFor(l.row)}
       <span class="t"><b>${esc(l.row.name)}</b><span>${esc(l.row.cat.set.code || l.row.cat.set.id)} ${esc(l.row.cat.number)} · ${p != null ? usd(p) + " each" : esc(priceLabel(l.id))} · ${have >= l.n ? `<span class="ok">you have ${have}</span>` : have ? `you have ${have}, need ${l.n - have} more` : "you don't have it"}</span></span>
       <span class="stepper"><button type="button" data-dec="${esc(l.id)}" aria-label="One fewer ${esc(l.row.name)}">−</button><output>${l.n}</output><button type="button" data-inc="${esc(l.id)}" aria-label="One more ${esc(l.row.name)}">+</button></span></div>`;
   };
@@ -1616,7 +1817,7 @@ async function renderDeckEditor(host, deck) {
   }).join("");
   const sgroups = [...new Set(out.map(o => o.group))].map(g => `<p class="sug-h">${esc(g)}</p>` + out.filter(o => o.group === g).map(o => {
     const r = repPrint(o.key); const p = priceOf(r.id); const have = owned.get(o.key) || 0;
-    return `<div class="sug"><span class="thumb">${thumbFor(r)}</span><span class="t"><b>${esc(r.name)}</b><span class="why">${esc(o.why)}</span>
+    return `<div class="sug">${thumbFor(r)}<span class="t"><b>${esc(r.name)}</b><span class="why">${esc(o.why)}</span>
       <span class="meta">${packLine(o.key)}</span>
       <span class="meta">Card ${p != null ? usd(p) : esc(priceLabel(r.id))} (${esc(r.cat.set.code || r.cat.set.id)} ${esc(r.cat.number)})${have ? ` · <span class="ok">you have ${have}</span>` : ""}</span></span>
       <button class="btn small" type="button" data-sugadd="${esc(r.id)}" data-n="${o.qty}">Add ${o.qty}</button></div>`;
@@ -1638,7 +1839,7 @@ async function renderDeckEditor(host, deck) {
     <div class="card-box">
       <div class="field"><label for="dkQ">Add a card</label><input id="dkQ" type="search" value="${esc(dv.q)}" placeholder="Card name" autocomplete="off"></div>
       <label class="inline-check"><input type="checkbox" id="dkOwned" ${dv.ownedOnly ? "checked" : ""}> Only cards I own</label>
-      ${results.length ? `<ul class="cands">${results.map(k => { const r = repPrint(k); const inD = an.lines.find(l => l.row.key === k); return `<li><button class="cand" type="button" data-addkey="${esc(k)}"><span class="thumb">${thumbFor(r)}</span><span class="t"><b>${esc(r.name)}</b><span>${esc(r.kind === "P" ? r.hp + " HP · " + r.atk.map(a => a[0] + (a[2] ? " " + a[2] : "")).join(", ") : r.subs.join(" · ") + (r.roles ? " · " + r.roles.split("").map(x => (ROLE_INFO[x] || [x])[0]).join(", ") : ""))}${owned.get(k) ? " · you have " + owned.get(k) : ""}${inD ? " · " + inD.n + " in deck" : ""}</span></span><span class="muted">+1</span></button></li>`; }).join("")}</ul>` : dv.q ? `<p class="muted" style="margin:0">No ${fmtName(deck.format)}-legal card matches that name.</p>` : ""}
+      ${results.length ? `<ul class="cands">${results.map(k => { const r = repPrint(k); const inD = an.lines.find(l => l.row.key === k); return `<li><button class="cand" type="button" data-addkey="${esc(k)}">${thumbFor(r)}<span class="t"><b>${esc(r.name)}</b><span>${esc(r.kind === "P" ? r.hp + " HP · " + r.atk.map(a => a[0] + (a[2] ? " " + a[2] : "")).join(", ") : r.subs.join(" · ") + (r.roles ? " · " + r.roles.split("").map(x => (ROLE_INFO[x] || [x])[0]).join(", ") : ""))}${owned.get(k) ? " · you have " + owned.get(k) : ""}${inD ? " · " + inD.n + " in deck" : ""}</span></span><span class="muted">+1</span></button></li>`; }).join("")}</ul>` : dv.q ? `<p class="muted" style="margin:0">No ${fmtName(deck.format)}-legal card matches that name.</p>` : ""}
     </div>
     ${groups ? `<div class="card-box">${groups}</div>` : ""}
     ${out.length ? `<div class="card-box"><b>Suggestions</b>${sgroups}<p class="src" style="margin:0">Pack prices have no free data source, so each card links to current pack listings instead. Suggestions follow the deck's rules and roles, not tournament results.</p></div>` : ""}
@@ -1684,10 +1885,18 @@ function collectionCSV(rows) {
   }
   return "﻿" + out.join("\r\n") + "\r\n";
 }
-function saveFile(blob, name) {
+/* Inside Claude a page can't download directly; the viewer confirms each file instead. Resolves true when saved. */
+async function saveFile(blob, name) {
+  if (inClaude) {
+    const dl = await claude.use("downloads").catch(() => null);
+    if (!dl) { toast("Downloads aren't available here. They work on the hosted site."); return false; }
+    try { await dl.save({ filename: name, data: blob }); return true; }
+    catch (e) { if (e && e.code !== "declined") toast("That file couldn't be saved here. Try the hosted site."); return false; }
+  }
   const url = URL.createObjectURL(blob); const a = document.createElement("a");
   a.href = url; a.download = name; a.rel = "noopener"; document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return true;
 }
 function shownNote(rows) {
   const copies = list => list.reduce((n, c) => n + (c.qty || 1), 0);
@@ -1787,10 +1996,10 @@ async function collectionImages(rows, onProgress) {
   return { pages, missing };
 }
 
-$("#dlCsv").addEventListener("click", () => {
+$("#dlCsv").addEventListener("click", async () => {
   const rows = visibleRows(); if (!rows.length) { toast("No cards to download."); return; }
-  saveFile(new Blob([collectionCSV(rows)], { type: "text/csv;charset=utf-8" }), `poke-lab-collection-${today()}.csv`);
-  toast(`Downloaded ${shownNote(rows)} as a spreadsheet`);
+  if (await saveFile(new Blob([collectionCSV(rows)], { type: "text/csv;charset=utf-8" }), `poke-lab-collection-${today()}.csv`))
+    toast(`Downloaded ${shownNote(rows)} as a spreadsheet`);
 });
 let exportShot = null;
 $("#imgSheet").addEventListener("close", () => { if (exportShot) exportShot.urls.forEach(u => URL.revokeObjectURL(u)); exportShot = null; $("#imgBody").innerHTML = ""; });
@@ -1812,7 +2021,7 @@ $("#dlImg").addEventListener("click", async () => {
         <button class="btn primary" type="button" id="imgSave">Download ${many ? "pictures" : "picture"}</button>
         ${canShare ? `<button class="btn" type="button" id="imgShare">Share or save to Photos</button>` : ""}
       </div>`;
-    $("#imgSave").addEventListener("click", () => files.forEach(f => saveFile(f, f.name)));
+    $("#imgSave").addEventListener("click", async () => { for (const f of files) { if (!(await saveFile(f, f.name)) && inClaude) break; } });
     const sh = $("#imgShare"); if (sh) sh.addEventListener("click", () => navigator.share({ files, title: "Poke Lab collection" }).catch(() => {}));
     note.textContent = "";
     $("#imgSheet").showModal();
@@ -1832,9 +2041,9 @@ document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click
 $("#fab").addEventListener("click", openAdd); $("#emptyAdd").addEventListener("click", openAdd);
 $("#list").addEventListener("click", e => { const r = e.target.closest("[data-open]"); if (r) openDetail(r.dataset.open); });
 $("#gallery").addEventListener("click", e => { const r = e.target.closest("[data-open]"); if (r) openDetail(r.dataset.open); });
-wireGalleryTilt();
+wireGalleryTilt(); wireArrange();
 $("#fPics").value = Prefs.pics;
-$("#fPics").addEventListener("change", e => { Prefs.pics = e.target.value; try { localStorage.setItem("pokelab-pics", Prefs.pics); } catch (x) {} renderList(); });
+$("#fPics").addEventListener("change", e => { Prefs.pics = e.target.value; try { localStorage.setItem("pokelab-pics2", Prefs.pics); } catch (x) {} renderList(); });
 function setTab(t, fromHash) {
   if (!["binder", "gallery", "decks"].includes(t)) t = "binder";
   view.tab = t; document.body.dataset.tab = t;
@@ -1852,8 +2061,8 @@ addEventListener("hashchange", () => setTab(location.hash.slice(1), true));
 $("#q").addEventListener("input", e => { view.q = e.target.value; renderList(); });
 $("#fSet").addEventListener("change", e => { view.set = e.target.value; renderList(); });
 $("#fRarity").addEventListener("change", e => { view.rarity = e.target.value; renderList(); });
-$("#fSort").addEventListener("change", e => { view.sort = e.target.value; try { localStorage.setItem("pokelab-sort", view.sort); } catch (x) {} renderList(); });
-try { const s = localStorage.getItem("pokelab-sort"); if (s) { view.sort = s; $("#fSort").value = s; } } catch (x) {}
+$("#fSort").addEventListener("change", e => { setSort(e.target.value); if (view.sort !== "manual") view.arranging = false; renderList(); });
+try { const s = localStorage.getItem("pokelab-sort"); if (s && SORTS[s]) { view.sort = s; $("#fSort").value = s; } } catch (x) {}
 Store.onChange(() => {
   const typing = document.activeElement && ["dkQ", "dkName", "arQ", "q", "mkIn"].includes(document.activeElement.id);
   if (!(view.tab === "decks" && typing)) renderList();
