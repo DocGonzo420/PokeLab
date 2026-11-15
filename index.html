@@ -15,10 +15,18 @@
 })();
 </script><script>
 if (/[?&]bindertest=/.test(location.search)) addEventListener("load", async () => {
-  while (!(typeof Cat !== "undefined" && Cat.ready)) await new Promise(r => setTimeout(r, 300));
-  const blob = await (await fetch("binder-test.jpg")).blob();
-  openAdd(); binderStart([new File([blob], "page.jpg", { type: "image/jpeg" })]);
+  try {
+    document.title = "T:waiting";
+    while (!(typeof Cat !== "undefined" && Cat.ready)) await new Promise(r => setTimeout(r, 300));
+    document.title = "T:fetch";
+    const res = await fetch("binder-test.jpg"); const blob = await res.blob();
+    document.title = "T:start " + res.status + " " + blob.size;
+    openAdd(); binderStart([new File([blob], "page.jpg", { type: "image/jpeg" })]);
+    document.title = "T:started";
+  } catch (e) { document.title = "T:ERR " + e; }
 });
+addEventListener("error", e => { document.title = "T:WERR " + e.message; });
+addEventListener("unhandledrejection", e => { document.title = "T:REJ " + (e.reason && e.reason.message || e.reason); });
 </script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
