@@ -148,6 +148,9 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 @media (prefers-reduced-motion:reduce){.spinner{animation:none}}
 
 .cands{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.cand-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+.cand-row .cand{min-width:0}
+.cand-add{height:44px;padding:0 16px;font-weight:600}
 .cand{display:grid;grid-template-columns:42px 1fr auto;gap:10px;align-items:center;padding:8px 10px 8px 8px;border:1.5px solid var(--line);border-radius:12px;cursor:pointer;background:var(--surface);width:100%;text-align:left}
 .cand[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 .cand .thumb{width:42px}
@@ -1267,10 +1270,12 @@ function renderAdd() {
   if (add.err) statusHtml += `<span class="err">${esc(add.err)}</span>`;
 
   const candList = add.cands.length ? `<div><p class="section-label">${add.read || (add.ocr && !add.searchQ) ? "Best matches" : "Results"}</p><ul class="cands">${add.cands.map(c => `
-      <li><button class="cand" type="button" data-cand="${esc(c.id)}" aria-pressed="${add.chosen && add.chosen.id === c.id}">
+      <li class="cand-row"><button class="cand" type="button" data-cand="${esc(c.id)}" aria-pressed="${add.chosen && add.chosen.id === c.id}">
         <span class="thumb">${imgTag(cardImage(c), c.name)}</span>
         <span class="t"><b>${esc(c.name)}</b><span>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.rarity || "No rarity listed")}</span></span>
-        <span class="tick" aria-hidden="true"></span></button></li>`).join("")}</ul></div>` : (add.read && add.step !== "reading" ? `<p class="muted" style="margin:0">No catalogue match for that reading. Search below.</p>` : "");
+        <span class="tick" aria-hidden="true"></span></button>
+        <button class="btn primary cand-add" type="button" data-addcand="${esc(c.id)}" aria-label="Add ${esc(c.name)}, ${esc(c.set.name)} ${esc(c.number)}">Add</button></li>`).join("")}</ul>
+      <p class="src" style="margin:6px 0 0">Add saves it now. To set finish, copies or condition first, pick the card and use the options below.</p></div>` : (add.read && add.step !== "reading" ? `<p class="muted" style="margin:0">No catalogue match for that reading. Search below.</p>` : "");
 
   const showSearch = add.step === "search" || (add.step === "review" && ((!add.read && !add.ocr) || !add.cands.length || add.showSearch));
   const searchHtml = add.step === "reading" ? "" : (showSearch
@@ -1299,12 +1304,13 @@ function renderAdd() {
   }
   const ss = $("#showSearch"); if (ss) ss.addEventListener("click", () => { add.showSearch = true; renderAdd(); $("#catQ") && $("#catQ").focus(); });
   b.querySelectorAll("[data-cand]").forEach(el => el.addEventListener("click", () => { add.chosen = Cat.byId.get(el.dataset.cand); renderAdd(); }));
+  b.querySelectorAll("[data-addcand]").forEach(el => el.addEventListener("click", () => { const c = Cat.byId.get(el.dataset.addcand); if (c) saveAdd(c, el); }));
   const fs = $("#finSel"); if (fs) fs.addEventListener("change", () => add.finish = fs.value);
   const qi = $("#qtyIn"); if (qi) qi.addEventListener("change", () => add.qty = Math.max(1, Math.min(999, parseInt(qi.value) || 1)));
   b.querySelectorAll("[data-q]").forEach(el => el.addEventListener("click", () => { add.qty = Math.max(1, Math.min(999, add.qty + parseInt(el.dataset.q))); $("#qtyIn").value = add.qty; }));
   const cs = $("#condSel"); if (cs) cs.addEventListener("change", () => { add.cond = { ...(add.cond || {}), grade: cs.value ? Number(cs.value) : null, source: "manual" }; renderAdd(); });
   const cb = $("#cenBtn"); if (cb) cb.addEventListener("click", () => { add.prevStep = add.step; add.step = "centering"; renderAdd(); });
-  const sv = $("#saveCard"); if (sv) sv.addEventListener("click", saveAdd);
+  const sv = $("#saveCard"); if (sv) sv.addEventListener("click", () => saveAdd(add.chosen, sv));
 }
 function renderCands() {
   /* re-render only the results part while typing, keeping focus in the search box */
@@ -1357,18 +1363,22 @@ async function takePhoto(file) {
     add.step = "review"; renderAdd();
   } else { add.step = "search"; renderAdd(); }
 }
-async function saveAdd() {
-  const c = add.chosen; if (!c) return;
-  const btn = $("#saveCard"); btn.disabled = true; btn.textContent = "Saving…";
+async function saveAdd(c, btn) {
+  if (!c || add.saving) return;
+  add.saving = true; add.chosen = c;
+  const label = btn.textContent;
+  $("#addBody").querySelectorAll("#saveCard,[data-addcand]").forEach(x => x.disabled = true);
+  btn.textContent = "Saving…";
   try {
     const photo = add.photoBlob ? await Store.savePhoto(add.photoBlob) : null;
     const rec = { id: "card_" + uid(), ...cardFromCatalogue(c), finish: add.finish, qty: add.qty, condition: add.cond || null, photo, read: add.read ? { name: add.read.name || "", number: add.read.number || "", setCode: add.read.setCode || "", confidence: add.read.confidence || "" } : null, addedAt: Date.now(), price: null };
     await Store.put(rec);
     $("#addSheet").close();
+    add.saving = false;
     toast(`Added ${c.name}`);
     refreshPrices(false, [rec]).catch(() => {});
   } catch (e) {
-    btn.disabled = false; btn.textContent = "Add to collection";
+    add.saving = false; btn.textContent = label;
     add.err = e && e.code === "quota_exceeded" ? "Your collection store is full." : "That card couldn't be saved. Try again."; renderAdd();
   }
 }
