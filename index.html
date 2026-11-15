@@ -203,6 +203,11 @@ tr.mine td{background:var(--sunk);font-weight:600}
 .tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 body[data-tab="gallery"] .wrap{max-width:1200px}
 @media (min-width:620px){.filters{grid-template-columns:2fr 1fr 1fr 1fr 1fr}}
+.exports{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.exports .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-right:2px}
+.exports .muted{font-size:12.5px}
+.export-prev{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--line);background:#0d1016}
+.export-actions{display:flex;flex-wrap:wrap;gap:8px}
 
 /* Gallery: a lit display wall. Cards rise into place as they scroll in, tilt toward the pointer, and carry their value on a label strip. */
 .gallery{list-style:none;margin:14px 0 120px;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
@@ -302,6 +307,7 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
     <div class="field"><label for="fSort">Sort</label>
       <select id="fSort"><option value="value">Highest value</option><option value="recent">Recently added</option><option value="set">Set and number</option><option value="name">Name</option></select></div>
     <div class="field"><label for="fPics">Pictures</label><select id="fPics"><option value="mine">My photos</option><option value="catalogue">Catalogue images</option></select></div>
+    <div class="exports" id="exports"><span class="k">Download</span><button class="btn small" type="button" id="dlCsv">Spreadsheet (CSV)</button><button class="btn small" type="button" id="dlImg">Collection image</button><span class="muted" id="dlNote" role="status"></span></div>
   </div>
   <ul class="list" id="list"></ul>
   <ul class="gallery" id="gallery" hidden></ul>
@@ -320,6 +326,13 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
   <div class="sheet-inner">
     <div class="sheet-head"><h2 id="addTitle">Add a card</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
     <div class="sheet-body" id="addBody"></div>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="imgSheet" aria-labelledby="imgTitle">
+  <div class="sheet-inner">
+    <div class="sheet-head"><h2 id="imgTitle">Collection picture</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
+    <div class="sheet-body" id="imgBody"></div>
   </div>
 </dialog>
 
@@ -822,15 +835,10 @@ function renderFilters(cards) {
   setSel.value = sets.has(keepS) ? keepS : ""; rSel.value = rars.has(keepR) ? keepR : "";
   view.set = setSel.value; view.rarity = rSel.value;
 }
-async function renderList() {
-  const cards = Store.cards;
-  renderTotals(cards); renderFilters(cards);
-  const has = cards.length > 0; const tab = view.tab;
-  if (tab === "decks") { $("#filters").hidden = true; $("#empty").hidden = true; $("#fab").hidden = true; $("#list").hidden = true; $("#gallery").hidden = true; $("#decks").hidden = false; return renderDecks(); }
-  $("#decks").hidden = true; $("#list").hidden = tab !== "binder"; $("#gallery").hidden = tab !== "gallery";
-  $("#filters").hidden = !has; $("#empty").hidden = has; $("#fab").hidden = !has;
+/* the cards the binder and gallery show, after search, filters and sort */
+function visibleRows() {
   const q = norm(view.q);
-  let rows = cards.filter(c => (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) &&
+  const rows = Store.cards.filter(c => (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) &&
     (!q || (norm(c.name) + " " + norm(c.setName) + " " + norm(c.setCode) + " " + norm(c.number)).includes(q)));
   const val = c => (pickPrice(c) || { value: -1 }).value;
   const cmp = {
@@ -838,8 +846,17 @@ async function renderList() {
     recent: (a, b) => (b.addedAt || 0) - (a.addedAt || 0),
     set: (a, b) => String(b.released).localeCompare(String(a.released)) || (parseInt(a.number) || 0) - (parseInt(b.number) || 0),
     name: (a, b) => a.name.localeCompare(b.name)
-  }[view.sort];
-  rows.sort(cmp);
+  }[view.sort] || (() => 0);
+  return rows.sort(cmp);
+}
+async function renderList() {
+  const cards = Store.cards;
+  renderTotals(cards); renderFilters(cards);
+  const has = cards.length > 0; const tab = view.tab;
+  if (tab === "decks") { $("#filters").hidden = true; $("#empty").hidden = true; $("#fab").hidden = true; $("#list").hidden = true; $("#gallery").hidden = true; $("#decks").hidden = false; return renderDecks(); }
+  $("#decks").hidden = true; $("#list").hidden = tab !== "binder"; $("#gallery").hidden = tab !== "gallery";
+  $("#filters").hidden = !has; $("#empty").hidden = has; $("#fab").hidden = !has;
+  const rows = visibleRows();
   if (tab === "gallery") return renderGallery(rows);
   const list = $("#list");
   if (has && !rows.length) { list.innerHTML = `<li class="muted" style="padding:16px 4px">No cards match these filters.</li>`; return; }
@@ -1645,6 +1662,164 @@ async function renderDeckEditor(host, deck) {
   });
 }
 
+
+/* ---------- downloads: the cards shown, as a spreadsheet or as one picture ---------- */
+const today = () => new Date().toISOString().slice(0, 10);
+function csvCell(v) {
+  let s = v == null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = "'" + s; // keep spreadsheets from reading a cell as a formula
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+const CSV_COLS = ["Name", "Set", "Set code", "Number", "Set total", "Series", "Rarity", "Finish", "Copies", "Condition (your call)", "Estimated grade", "Centering", "Price each (USD)", "Value (USD)", "Price is for", "Price date", "Price source", "Catalogue ID", "Added"];
+function collectionCSV(rows) {
+  const out = [CSV_COLS.map(csvCell).join(",")];
+  for (const c of rows) {
+    const p = pickPrice(c), q = c.qty || 1, cond = c.condition || {}, g = cond.grade;
+    const yours = cond.source === "manual" && g != null ? ((CONDS.find(x => x[0] === String(g)) || [])[1] || "") : "";
+    out.push([c.name, c.setName, c.setCode || "", c.number, c.printedTotal || "", c.series || "", c.rarity || "",
+      c.finish ? finishLabel(c.finish) : "", q, yours, g == null ? "" : g, cond.centering || "",
+      p ? p.value.toFixed(2) : "", p ? (p.value * q).toFixed(2) : "", p ? finishLabel(p.finish) : "",
+      c.price && c.price.updated ? String(c.price.updated).slice(0, 10).replace(/\//g, "-") : "", c.price ? c.price.source || "" : "",
+      c.cardId || "", c.addedAt ? new Date(c.addedAt).toISOString().slice(0, 10) : ""].map(csvCell).join(","));
+  }
+  return "﻿" + out.join("\r\n") + "\r\n";
+}
+function saveFile(blob, name) {
+  const url = URL.createObjectURL(blob); const a = document.createElement("a");
+  a.href = url; a.download = name; a.rel = "noopener"; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+function shownNote(rows) {
+  const copies = list => list.reduce((n, c) => n + (c.qty || 1), 0);
+  const n = copies(rows), all = copies(Store.cards);
+  return n < all ? `the ${n} of your ${all} cards that your filters show` : `all ${n} of your card${n === 1 ? "" : "s"}`;
+}
+
+function loadImg(src) {
+  return new Promise(res => {
+    if (!src) return res(null);
+    const im = new Image();
+    if (/^https?:/i.test(src) && new URL(src).origin !== location.origin) im.crossOrigin = "anonymous";
+    const t = setTimeout(() => res(null), 15000);
+    im.onload = () => { clearTimeout(t); res(im.naturalWidth ? im : null); };
+    im.onerror = () => { clearTimeout(t); res(null); };
+    im.src = src;
+  });
+}
+async function exportPicture(c) {
+  const cat = Cat.byId.get(c.cardId);
+  let photo = photoCache.get(c.id); if (photo === undefined) { photo = await Store.photoURL(c); photoCache.set(c.id, photo); }
+  const catalogue = cat ? cardImage(cat, true) : "";
+  const order = Prefs.pics === "catalogue" ? [catalogue, photo] : [photo, catalogue];
+  for (const src of order) { const im = await loadImg(src); if (im) return im; }
+  return null;
+}
+function fitText(ctx, text, max) {
+  if (ctx.measureText(text).width <= max) return text;
+  let t = text; while (t.length > 1 && ctx.measureText(t + "…").width > max) t = t.slice(0, -1);
+  return t + "…";
+}
+function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+const IMG_PAGE = 96; // cards per picture: 8 across, 12 down
+async function collectionImages(rows, onProgress) {
+  const W = 250, H = 349, LABEL = 62, GAP = 26, M = 48, HEAD = 112;
+  const body = getComputedStyle(document.body).fontFamily || "system-ui, sans-serif";
+  const display = getComputedStyle(document.documentElement).getPropertyValue("--f-display").trim() || body;
+  let total = 0, count = 0; const sets = new Set();
+  for (const c of rows) { const q = c.qty || 1; count += q; sets.add(c.setId); const p = pickPrice(c); if (p) total += p.value * q; }
+  const pages = []; let missing = 0, done = 0;
+  const nPages = Math.ceil(rows.length / IMG_PAGE);
+  for (let pi = 0; pi < nPages; pi++) {
+    const chunk = rows.slice(pi * IMG_PAGE, (pi + 1) * IMG_PAGE);
+    const cols = Math.min(8, Math.max(1, Math.ceil(Math.sqrt(chunk.length * 1.15))));
+    const nRows = Math.ceil(chunk.length / cols);
+    const cw = Math.max(M * 2 + cols * W + (cols - 1) * GAP, 640);
+    const ch = M + HEAD + nRows * (H + LABEL) + (nRows - 1) * GAP + M;
+    const cv = document.createElement("canvas"); cv.width = cw; cv.height = ch;
+    const ctx = cv.getContext("2d");
+    const bg = ctx.createLinearGradient(0, 0, 0, ch); bg.addColorStop(0, "#161a22"); bg.addColorStop(1, "#0d1016");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, cw, ch);
+    const holo = ctx.createLinearGradient(M, 0, cw - M, 0);
+    ["#ff8a8a", "#ffd36b", "#8be0a4", "#7cc8ff", "#c8a2ff", "#ff9bd2"].forEach((col, i, a) => holo.addColorStop(i / (a.length - 1), col));
+    ctx.fillStyle = holo; ctx.fillRect(M, M + HEAD - 26, cw - 2 * M, 4);
+    ctx.textBaseline = "alphabetic"; ctx.fillStyle = "#ffffff"; ctx.font = `800 44px ${display}`;
+    ctx.fillText("Poke Lab", M, M + 42);
+    ctx.font = `500 20px ${body}`; ctx.fillStyle = "rgba(255,255,255,.72)";
+    const meta = `${count} card${count === 1 ? "" : "s"} · ${sets.size} set${sets.size === 1 ? "" : "s"} · ${usd(total)}${nPages > 1 ? ` · picture ${pi + 1} of ${nPages}` : ""}`;
+    ctx.fillText(fitText(ctx, meta, cw - 2 * M - 160), M, M + 74);
+    ctx.textAlign = "right"; ctx.fillText(today(), cw - M, M + 74); ctx.textAlign = "left";
+    for (let i = 0; i < chunk.length; i++) {
+      const c = chunk[i]; const x = M + (i % cols) * (W + GAP), y = M + HEAD + Math.floor(i / cols) * (H + LABEL + GAP);
+      ctx.save(); roundRect(ctx, x, y, W, H, 12); ctx.clip();
+      const im = await exportPicture(c);
+      if (im) {
+        const s = Math.max(W / im.naturalWidth, H / im.naturalHeight); const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
+        ctx.drawImage(im, x + (W - dw) / 2, y + (H - dh) / 2, dw, dh);
+      } else {
+        missing++;
+        ctx.fillStyle = "#262b36"; ctx.fillRect(x, y, W, H);
+        ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.font = `700 22px ${body}`; ctx.textAlign = "center";
+        ctx.fillText(fitText(ctx, c.name, W - 24), x + W / 2, y + H / 2);
+        ctx.font = `500 15px ${body}`; ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.fillText("No picture", x + W / 2, y + H / 2 + 26); ctx.textAlign = "left";
+      }
+      ctx.restore();
+      const badge = (text, right) => {
+        ctx.font = `700 15px ${body}`; const tw = ctx.measureText(text).width + 18;
+        const bx = right ? x + W - 10 - tw : x + 10; ctx.fillStyle = "rgba(8,10,14,.8)"; roundRect(ctx, bx, y + 10, tw, 28, 14); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.fillText(text, bx + 9, y + 29);
+      };
+      if ((c.qty || 1) > 1) badge(`×${c.qty}`, false);
+      const g = c.condition && c.condition.grade; if (g != null && g !== "") badge(`Est. ${g}`, true);
+      const p = pickPrice(c);
+      ctx.fillStyle = "#ffffff"; ctx.font = `600 18px ${body}`;
+      ctx.fillText(fitText(ctx, c.name, W), x, y + H + 24);
+      const price = p ? usd(p.value) : "No price";
+      ctx.font = `800 18px ${display}`; const pw = ctx.measureText(price).width;
+      ctx.fillStyle = p ? "#ffffff" : "rgba(255,255,255,.5)"; ctx.textAlign = "right"; ctx.fillText(price, x + W, y + H + 50); ctx.textAlign = "left";
+      ctx.font = `500 14px ${body}`; ctx.fillStyle = "rgba(255,255,255,.62)";
+      ctx.fillText(fitText(ctx, `${c.setCode || c.setId} ${c.number}${c.rarity ? " · " + c.rarity : ""}`, W - pw - 12), x, y + H + 50);
+      onProgress && onProgress(++done, rows.length);
+    }
+    const blob = await new Promise(res => { try { cv.toBlob(b => res(b), "image/jpeg", 0.9); } catch (e) { res(null); } });
+    if (!blob) throw new Error("canvas");
+    pages.push(blob);
+  }
+  return { pages, missing };
+}
+
+$("#dlCsv").addEventListener("click", () => {
+  const rows = visibleRows(); if (!rows.length) { toast("No cards to download."); return; }
+  saveFile(new Blob([collectionCSV(rows)], { type: "text/csv;charset=utf-8" }), `poke-lab-collection-${today()}.csv`);
+  toast(`Downloaded ${shownNote(rows)} as a spreadsheet`);
+});
+let exportShot = null;
+$("#imgSheet").addEventListener("close", () => { if (exportShot) exportShot.urls.forEach(u => URL.revokeObjectURL(u)); exportShot = null; $("#imgBody").innerHTML = ""; });
+$("#dlImg").addEventListener("click", async () => {
+  const btn = $("#dlImg"), note = $("#dlNote"); const rows = visibleRows();
+  if (!rows.length) { toast("No cards to download."); return; }
+  btn.disabled = true; note.textContent = "Making the picture…";
+  try {
+    const { pages, missing } = await collectionImages(rows, (d, n) => { note.textContent = `Drawing cards ${d} of ${n}…`; });
+    const base = `poke-lab-collection-${today()}`;
+    const files = pages.map((b, i) => new File([b], `${base}${pages.length > 1 ? "-" + (i + 1) : ""}.jpg`, { type: "image/jpeg" }));
+    exportShot = { files, urls: files.map(f => URL.createObjectURL(f)) };
+    const canShare = !!(navigator.canShare && navigator.share && navigator.canShare({ files }));
+    const many = files.length > 1;
+    $("#imgBody").innerHTML = `
+      <p class="muted" style="margin:0">${esc("This picture has " + shownNote(rows) + ".")}${many ? ` It's split into ${files.length} pictures of up to ${IMG_PAGE} cards.` : ""}${missing ? ` ${missing} card${missing === 1 ? " is" : "s are"} shown without a picture because the image couldn't be loaded.` : ""}</p>
+      ${exportShot.urls.map((u, i) => `<img class="export-prev" src="${u}" alt="Picture of your collection${many ? ", part " + (i + 1) : ""}">`).join("")}
+      <div class="export-actions">
+        <button class="btn primary" type="button" id="imgSave">Download ${many ? "pictures" : "picture"}</button>
+        ${canShare ? `<button class="btn" type="button" id="imgShare">Share or save to Photos</button>` : ""}
+      </div>`;
+    $("#imgSave").addEventListener("click", () => files.forEach(f => saveFile(f, f.name)));
+    const sh = $("#imgShare"); if (sh) sh.addEventListener("click", () => navigator.share({ files, title: "Poke Lab collection" }).catch(() => {}));
+    note.textContent = "";
+    $("#imgSheet").showModal();
+  } catch (e) {
+    note.textContent = "That picture couldn't be made here. The spreadsheet still works.";
+  } finally { btn.disabled = false; }
+});
 
 /* ---------- wiring ---------- */
 document.addEventListener("error", e => {
