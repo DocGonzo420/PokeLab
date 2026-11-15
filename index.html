@@ -1916,14 +1916,18 @@ function loadImg(src) {
     im.src = src;
   });
 }
-async function exportPicture(c) {
+async function exportPictures(c, mode) {
   const cat = Cat.byId.get(c.cardId);
   let photo = photoCache.get(c.id); if (photo === undefined) { photo = await Store.photoURL(c); photoCache.set(c.id, photo); }
   const catalogue = cat ? cardImage(cat, true) : "";
-  const order = Prefs.pics === "catalogue" ? [catalogue, photo] : [photo, catalogue];
-  for (const src of order) { const im = await loadImg(src); if (im) return im; }
-  return null;
+  if (mode === "both") return { mine: await loadImg(photo), cat: await loadImg(catalogue) };
+  const first = mode === "mine" ? photo : catalogue, second = mode === "mine" ? catalogue : photo;
+  const im = await loadImg(first); if (im) return { one: im };
+  return { one: await loadImg(second), swapped: true };
 }
+const EXPORT_PICS = { catalogue: "Catalogue images", mine: "My photos", both: "Both, side by side" };
+let exportPics = "";
+try { const v = localStorage.getItem("pokelab-exportpics"); if (EXPORT_PICS[v]) exportPics = v; } catch (x) {}
 function fitText(ctx, text, max) {
   if (ctx.measureText(text).width <= max) return text;
   let t = text; while (t.length > 1 && ctx.measureText(t + "…").width > max) t = t.slice(0, -1);
@@ -1931,17 +1935,19 @@ function fitText(ctx, text, max) {
 }
 function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 const IMG_PAGE = 96; // cards per picture: 8 across, 12 down
-async function collectionImages(rows, onProgress) {
-  const W = 250, H = 349, LABEL = 62, GAP = 26, M = 48, HEAD = 112;
+async function collectionImages(rows, onProgress, mode) {
+  const both = mode === "both";
+  const PW = both ? 200 : 250, PH = both ? 279 : 349, INNER = 10;
+  const W = both ? PW * 2 + INNER : PW, H = PH, LABEL = 62, GAP = 26, M = 48, HEAD = 112;
   const body = getComputedStyle(document.body).fontFamily || "system-ui, sans-serif";
   const display = getComputedStyle(document.documentElement).getPropertyValue("--f-display").trim() || body;
   let total = 0, count = 0; const sets = new Set();
   for (const c of rows) { const q = c.qty || 1; count += q; sets.add(c.setId); const p = pickPrice(c); if (p) total += p.value * q; }
-  const pages = []; let missing = 0, done = 0;
+  const pages = []; let missing = 0, noPhoto = 0, done = 0;
   const nPages = Math.ceil(rows.length / IMG_PAGE);
   for (let pi = 0; pi < nPages; pi++) {
     const chunk = rows.slice(pi * IMG_PAGE, (pi + 1) * IMG_PAGE);
-    const cols = Math.min(8, Math.max(1, Math.ceil(Math.sqrt(chunk.length * 1.15))));
+    const cols = Math.min(both ? 5 : 8, Math.max(1, Math.ceil(Math.sqrt(chunk.length * (both ? 0.6 : 1.15)))));
     const nRows = Math.ceil(chunk.length / cols);
     const cw = Math.max(M * 2 + cols * W + (cols - 1) * GAP, 640);
     const ch = M + HEAD + nRows * (H + LABEL) + (nRows - 1) * GAP + M;
@@ -1960,19 +1966,27 @@ async function collectionImages(rows, onProgress) {
     ctx.textAlign = "right"; ctx.fillText(today(), cw - M, M + 74); ctx.textAlign = "left";
     for (let i = 0; i < chunk.length; i++) {
       const c = chunk[i]; const x = M + (i % cols) * (W + GAP), y = M + HEAD + Math.floor(i / cols) * (H + LABEL + GAP);
-      ctx.save(); roundRect(ctx, x, y, W, H, 12); ctx.clip();
-      const im = await exportPicture(c);
-      if (im) {
-        const s = Math.max(W / im.naturalWidth, H / im.naturalHeight); const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
-        ctx.drawImage(im, x + (W - dw) / 2, y + (H - dh) / 2, dw, dh);
+      const pics = await exportPictures(c, mode);
+      const slot = (im, px, empty) => {
+        ctx.save(); roundRect(ctx, px, y, PW, PH, 12); ctx.clip();
+        if (im) {
+          const s = Math.max(PW / im.naturalWidth, PH / im.naturalHeight); const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
+          ctx.drawImage(im, px + (PW - dw) / 2, y + (PH - dh) / 2, dw, dh);
+        } else {
+          ctx.fillStyle = "#262b36"; ctx.fillRect(px, y, PW, PH);
+          ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.font = `700 ${both ? 18 : 22}px ${body}`; ctx.textAlign = "center";
+          ctx.fillText(fitText(ctx, c.name, PW - 24), px + PW / 2, y + PH / 2);
+          ctx.font = `500 15px ${body}`; ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.fillText(empty, px + PW / 2, y + PH / 2 + 26); ctx.textAlign = "left";
+        }
+        ctx.restore();
+      };
+      if (both) {
+        if (!pics.mine) noPhoto++; if (!pics.cat) missing++;
+        slot(pics.mine, x, "No photo"); slot(pics.cat, x + PW + INNER, "No picture");
       } else {
-        missing++;
-        ctx.fillStyle = "#262b36"; ctx.fillRect(x, y, W, H);
-        ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.font = `700 22px ${body}`; ctx.textAlign = "center";
-        ctx.fillText(fitText(ctx, c.name, W - 24), x + W / 2, y + H / 2);
-        ctx.font = `500 15px ${body}`; ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.fillText("No picture", x + W / 2, y + H / 2 + 26); ctx.textAlign = "left";
+        if (!pics.one) missing++; else if (pics.swapped && mode === "mine") noPhoto++;
+        slot(pics.one, x, "No picture");
       }
-      ctx.restore();
       const badge = (text, right) => {
         ctx.font = `700 15px ${body}`; const tw = ctx.measureText(text).width + 18;
         const bx = right ? x + W - 10 - tw : x + 10; ctx.fillStyle = "rgba(8,10,14,.8)"; roundRect(ctx, bx, y + 10, tw, 28, 14); ctx.fill();
@@ -1994,7 +2008,7 @@ async function collectionImages(rows, onProgress) {
     if (!blob) throw new Error("canvas");
     pages.push(blob);
   }
-  return { pages, missing };
+  return { pages, missing, noPhoto };
 }
 
 $("#dlCsv").addEventListener("click", async () => {
@@ -2003,20 +2017,30 @@ $("#dlCsv").addEventListener("click", async () => {
     toast(`Downloaded ${shownNote(rows)} as a spreadsheet`);
 });
 let exportShot = null;
-$("#imgSheet").addEventListener("close", () => { if (exportShot) exportShot.urls.forEach(u => URL.revokeObjectURL(u)); exportShot = null; $("#imgBody").innerHTML = ""; });
-$("#dlImg").addEventListener("click", async () => {
-  const btn = $("#dlImg"), note = $("#dlNote"); const rows = visibleRows();
-  if (!rows.length) { toast("No cards to download."); return; }
-  btn.disabled = true; note.textContent = "Making the picture…";
+$("#imgSheet").addEventListener("close", () => { exportRun++; if (exportShot) exportShot.urls.forEach(u => URL.revokeObjectURL(u)); exportShot = null; $("#imgBody").innerHTML = ""; });
+const SORT_NAMES = { value: "highest value", low: "lowest value", recent: "recently added", rarity: "rarest first", grade: "best condition", set: "set and number", name: "name", manual: "your own order" };
+let exportRun = 0;
+async function drawExport(rows) {
+  const run = ++exportRun, mode = exportPics;
+  const body = $("#imgBody"), status = $("#imgStatus"), out = $("#imgOut");
+  if (exportShot) exportShot.urls.forEach(u => URL.revokeObjectURL(u)); exportShot = null;
+  out.innerHTML = ""; status.textContent = "Making the picture…";
   try {
-    const { pages, missing } = await collectionImages(rows, (d, n) => { note.textContent = `Drawing cards ${d} of ${n}…`; });
+    const { pages, missing, noPhoto } = await collectionImages(rows, (d, n) => { if (run === exportRun) status.textContent = `Drawing cards ${d} of ${n}…`; }, mode);
+    if (run !== exportRun || !body.isConnected) return;
     const base = `poke-lab-collection-${today()}`;
     const files = pages.map((b, i) => new File([b], `${base}${pages.length > 1 ? "-" + (i + 1) : ""}.jpg`, { type: "image/jpeg" }));
     exportShot = { files, urls: files.map(f => URL.createObjectURL(f)) };
     const canShare = !!(navigator.canShare && navigator.share && navigator.canShare({ files }));
     const many = files.length > 1;
-    $("#imgBody").innerHTML = `
-      <p class="muted" style="margin:0">${esc("This picture has " + shownNote(rows) + ".")}${many ? ` It's split into ${files.length} pictures of up to ${IMG_PAGE} cards.` : ""}${missing ? ` ${missing} card${missing === 1 ? " is" : "s are"} shown without a picture because the image couldn't be loaded.` : ""}</p>
+    const notes = [`This picture has ${shownNote(rows)}, sorted by ${SORT_NAMES[view.sort] || "highest value"}.`];
+    if (many) notes.push(`It's split into ${files.length} pictures of up to ${IMG_PAGE} cards.`);
+    if (noPhoto) notes.push(mode === "mine"
+      ? `${noPhoto} card${noPhoto === 1 ? " has" : "s have"} no photo of yours, so ${noPhoto === 1 ? "it shows" : "they show"} the catalogue picture.`
+      : `${noPhoto} card${noPhoto === 1 ? " has" : "s have"} no photo of yours yet.`);
+    if (missing) notes.push(`${missing} card${missing === 1 ? " is" : "s are"} shown without a picture because the image couldn't be loaded.`);
+    status.textContent = notes.join(" ");
+    out.innerHTML = `
       ${exportShot.urls.map((u, i) => `<img class="export-prev" src="${u}" alt="Picture of your collection${many ? ", part " + (i + 1) : ""}">`).join("")}
       <div class="export-actions">
         <button class="btn primary" type="button" id="imgSave">Download ${many ? "pictures" : "picture"}</button>
@@ -2024,11 +2048,25 @@ $("#dlImg").addEventListener("click", async () => {
       </div>`;
     $("#imgSave").addEventListener("click", async () => { for (const f of files) { if (!(await saveFile(f, f.name)) && inClaude) break; } });
     const sh = $("#imgShare"); if (sh) sh.addEventListener("click", () => navigator.share({ files, title: "Poke Lab collection" }).catch(() => {}));
-    note.textContent = "";
-    $("#imgSheet").showModal();
   } catch (e) {
-    note.textContent = "That picture couldn't be made here. The spreadsheet still works.";
-  } finally { btn.disabled = false; }
+    if (run === exportRun) status.textContent = "That picture couldn't be made here. The spreadsheet still works.";
+  }
+}
+$("#dlImg").addEventListener("click", async () => {
+  const rows = visibleRows();
+  if (!rows.length) { toast("No cards to download."); return; }
+  if (!EXPORT_PICS[exportPics]) exportPics = Prefs.pics === "mine" ? "mine" : Prefs.pics === "catalogue" ? "catalogue" : "both";
+  $("#imgBody").innerHTML = `
+    <div class="field"><label for="imgPics">Pictures in this image</label>
+      <select id="imgPics">${Object.entries(EXPORT_PICS).map(([v, t]) => `<option value="${v}"${v === exportPics ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+    <p class="muted" id="imgStatus" role="status" style="margin:0"></p>
+    <div id="imgOut" style="display:flex;flex-direction:column;gap:12px"></div>`;
+  $("#imgPics").addEventListener("change", e => {
+    exportPics = e.target.value; try { localStorage.setItem("pokelab-exportpics", exportPics); } catch (x) {}
+    drawExport(rows);
+  });
+  $("#imgSheet").showModal();
+  drawExport(rows);
 });
 
 /* ---------- wiring ---------- */
