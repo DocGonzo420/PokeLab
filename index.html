@@ -335,7 +335,7 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
     <div class="field"><label for="fSort">Sort</label>
       <select id="fSort"><option value="value">Highest value</option><option value="low">Lowest value</option><option value="recent">Recently added</option><option value="rarity">Rarest first</option><option value="grade">Best condition</option><option value="set">Set and number</option><option value="name">Name</option><option value="manual">My order</option></select></div>
     <div class="field"><label for="fPics">Pictures</label><select id="fPics"><option value="both">Both</option><option value="mine">My photos</option><option value="catalogue">Catalogue images</option></select></div>
-    <div class="exports" id="exports"><span class="k">Download</span><button class="btn small" type="button" id="dlCsv">Spreadsheet (CSV)</button><button class="btn small" type="button" id="dlImg">Collection image</button><span class="muted" id="dlNote" role="status"></span></div>
+    <div class="exports"><span class="k">Download</span><button class="btn small" type="button" id="dlCsv">Spreadsheet (CSV)</button><button class="btn small" type="button" id="dlImg">Collection image</button><span class="muted" id="dlNote" role="status"></span></div>
   </div>
   <ul class="list" id="list"></ul>
   <div class="gtools" id="gtools" hidden></div>
@@ -778,10 +778,14 @@ function ocrWorker(onStatus) {
     if (!window.Tesseract) await new Promise((res, rej) => {
       const sc = document.createElement("script");
       sc.src = "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js";
-      sc.onload = res; sc.onerror = () => rej(new Error("reader script"));
+      sc.onload = res; sc.onerror = () => rej(Object.assign(new Error("reader script"), { load: true }));
       document.head.append(sc);
     });
-    OCR.worker = await window.Tesseract.createWorker("eng");
+    // The reader's loader looks for a global "exports" first; an element with that id would catch it instead.
+    const T = window.Tesseract || (window.exports && window.exports.Tesseract);
+    if (!T) throw Object.assign(new Error("reader missing"), { load: true });
+    window.Tesseract = T;
+    OCR.worker = await T.createWorker("eng").catch(e => { throw Object.assign(e instanceof Error ? e : new Error(String(e)), { load: true }); });
     return OCR.worker;
   })().catch(e => { OCR.loading = null; throw e; });
   return OCR.loading;
@@ -1089,7 +1093,8 @@ async function takePhoto(file) {
       add.ocr = { number: r.number }; add.cands = r.cands; add.chosen = r.cands[0] || null;
       if (r.number && !r.cands.length) add.searchQ = r.number;
     } catch (e) {
-      add.err = "The text reader couldn't load. Check your connection, or search below.";
+      add.err = e && e.load ? "The text reader couldn't load. Check your connection, or search below."
+        : "The card number couldn't be read from that photo. Search below, or try a sharper photo.";
     }
     if (!add.cands.length && add.searchQ) add.cands = searchCatalogue(add.searchQ, 20);
     add.step = "review"; renderAdd();
