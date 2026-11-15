@@ -126,12 +126,17 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .picker input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
 .picker.wide{grid-column:1/-1;height:84px;border-style:solid;border-color:var(--accent);font:inherit;font-weight:600;color:inherit}
 .add-err{margin:0;color:var(--warn);font-size:13.5px}
-.scan{position:relative;width:100%;max-width:440px;margin:0 auto;aspect-ratio:3/4;max-height:64vh;border-radius:14px;overflow:hidden;background:#000}
+.scan{position:relative;width:100%;max-width:440px;margin:0 auto;aspect-ratio:3/4;max-height:60vh;border-radius:14px;overflow:hidden;background:#000;touch-action:none;user-select:none;-webkit-user-select:none}
 .scan video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-.scan-frame{position:absolute;left:50%;top:50%;height:86%;aspect-ratio:63/88;transform:translate(-50%,-50%);border:3px solid rgba(255,255,255,.92);border-radius:12px;box-shadow:0 0 0 999px rgba(0,0,0,.45);transition:border-color .2s}
+.scan-frame{position:absolute;left:50%;top:50%;height:86%;aspect-ratio:63/88;transform:translate(-50%,-50%);border:3px solid rgba(255,255,255,.92);border-radius:12px;box-shadow:0 0 0 999px rgba(0,0,0,.45);transition:border-color .2s;cursor:move}
 .scan-num{position:absolute;left:4%;right:4%;bottom:2%;height:12%;border:2px dashed #ffd36b;border-radius:6px}
 .scan.seen .scan-frame{border-color:#8be0a4}
 .scan.seen .scan-num{border-color:#8be0a4;border-style:solid}
+.scan-focus{position:absolute;width:60px;height:60px;margin:-30px 0 0 -30px;border:2px solid #ffd36b;border-radius:50%;opacity:0;transform:scale(1.4);transition:opacity .25s,transform .25s;pointer-events:none}
+.scan-focus.on{opacity:1;transform:scale(1)}
+.scan-ctl{display:grid;gap:8px;margin:0}
+.scan-ctl label{display:grid;grid-template-columns:7.2em 1fr;align-items:center;gap:10px;font-size:14px}
+.scan-ctl input[type=range]{width:100%;accent-color:var(--accent)}
 
 .shot{display:grid;grid-template-columns:110px 1fr;gap:14px;align-items:start}
 .shot img{width:110px;aspect-ratio:63/88;object-fit:cover;border-radius:8px;background:var(--sunk);max-width:100%}
@@ -799,13 +804,112 @@ function ocrWorker(onStatus) {
   return OCR.loading;
 }
 /* live camera scan: reads the collector number from the video, like a barcode scanner */
-const Scan = { stream: null, track: null, run: 0, torch: false };
+const Scan = { stream: null, track: null, run: 0, torch: false, caps: {}, focusTimer: 0, toldFocus: false };
+/* frame size and place (in % of the camera box), camera zoom and focus are remembered, so a scanner stand only needs setting once */
+const SCAN_FRAME = { size: 86, cx: 50, cy: 50 };
+const ScanPrefs = (() => { try { return Object.assign({ ...SCAN_FRAME }, JSON.parse(localStorage.getItem("pokelab-scan") || "{}")); } catch (e) { return { ...SCAN_FRAME }; } })();
+function saveScanPrefs() { try { localStorage.setItem("pokelab-scan", JSON.stringify(ScanPrefs)); } catch (e) {} }
+function placeFrame() {
+  const box = $("#scanBox"), f = $("#scanFrame"); if (!box || !f) return;
+  const bw = box.clientWidth, bh = box.clientHeight; if (!bw || !bh) return;
+  ScanPrefs.size = Math.min(100, Math.max(30, ScanPrefs.size));
+  const fh = bh * ScanPrefs.size / 100, fw = fh * 63 / 88;
+  const mx = Math.min(50, fw / 2 / bw * 100), my = Math.min(50, fh / 2 / bh * 100);
+  ScanPrefs.cx = Math.min(100 - mx, Math.max(mx, ScanPrefs.cx));
+  ScanPrefs.cy = Math.min(100 - my, Math.max(my, ScanPrefs.cy));
+  f.style.height = ScanPrefs.size + "%"; f.style.left = ScanPrefs.cx + "%"; f.style.top = ScanPrefs.cy + "%";
+  const r = $("#scanSize"); if (r) r.value = Math.round(ScanPrefs.size);
+}
+function scanHintOnce(msg) { const h = $("#scanHint"); if (h) h.textContent = msg; }
+/* box point (px) to a 0-1 point in the camera image, allowing for the cover crop */
+function boxToVideo(x, y) {
+  const v = $("#scanVideo"), b = $("#scanBox").getBoundingClientRect(), vw = v.videoWidth, vh = v.videoHeight;
+  if (!vw || !vh) return { x: 0.5, y: 0.5 };
+  const s = Math.max(b.width / vw, b.height / vh), ox = (b.width - vw * s) / 2, oy = (b.height - vh * s) / 2;
+  return { x: Math.min(1, Math.max(0, (x - ox) / s / vw)), y: Math.min(1, Math.max(0, (y - oy) / s / vh)) };
+}
+async function scanFocusAt(x, y) {
+  const ring = $("#scanFocus");
+  if (ring) { ring.style.left = x + "px"; ring.style.top = y + "px"; ring.classList.remove("on"); void ring.offsetWidth; ring.classList.add("on"); setTimeout(() => ring.classList.remove("on"), 900); }
+  const t = Scan.track; if (!t) return;
+  const modes = Scan.caps.focusMode || [], sup = navigator.mediaDevices.getSupportedConstraints ? navigator.mediaDevices.getSupportedConstraints() : {};
+  const adv = {};
+  if (sup.pointsOfInterest) adv.pointsOfInterest = [boxToVideo(x, y)];
+  if (modes.includes("single-shot")) adv.focusMode = "single-shot";
+  else if (modes.includes("continuous")) adv.focusMode = "continuous";
+  if (!adv.focusMode && !adv.pointsOfInterest) {
+    if (!Scan.toldFocus) { Scan.toldFocus = true; scanHintOnce(Scan.caps.focusDistance ? "Use the Focus slider to sharpen the number." : "This browser doesn't let websites focus the camera. Raise or lower the phone a little until the number is sharp."); }
+    return;
+  }
+  try { await t.applyConstraints({ advanced: [adv] }); } catch (e) {}
+  clearTimeout(Scan.focusTimer);
+  if (adv.focusMode === "single-shot" && modes.includes("continuous") && ScanPrefs.focus == null)
+    Scan.focusTimer = setTimeout(() => { if (Scan.track === t) t.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {}); }, 4000);
+}
+function scanControls() {
+  const t = Scan.track; if (!t) return;
+  try { Scan.caps = t.getCapabilities ? t.getCapabilities() : {}; } catch (e) { Scan.caps = {}; }
+  const c = Scan.caps;
+  const zr = $("#scanZoom");
+  if (c.zoom && zr && c.zoom.max > c.zoom.min) {
+    zr.min = c.zoom.min; zr.max = c.zoom.max; zr.step = c.zoom.step || 0.1;
+    const z = ScanPrefs.zoom != null ? Math.min(c.zoom.max, Math.max(c.zoom.min, ScanPrefs.zoom)) : (t.getSettings().zoom || c.zoom.min);
+    zr.value = z; $("#scanZoomRow").hidden = false;
+    if (ScanPrefs.zoom != null) t.applyConstraints({ advanced: [{ zoom: z }] }).catch(() => {});
+  }
+  const fr = $("#scanFocusDist");
+  if (c.focusDistance && fr && c.focusDistance.max > c.focusDistance.min && (c.focusMode || []).includes("manual")) {
+    fr.min = c.focusDistance.min; fr.max = c.focusDistance.max; fr.step = c.focusDistance.step || 0.01;
+    const d = ScanPrefs.focus != null ? Math.min(c.focusDistance.max, Math.max(c.focusDistance.min, ScanPrefs.focus)) : (t.getSettings().focusDistance || c.focusDistance.min);
+    fr.value = d; $("#scanFocusRow").hidden = false;
+    if (ScanPrefs.focus != null) t.applyConstraints({ advanced: [{ focusMode: "manual", focusDistance: d }] }).catch(() => {});
+  }
+}
+function scanPointer(box) {
+  const pts = new Map(); let mode = "", start = null;
+  const local = e => { const b = box.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
+  box.addEventListener("pointerdown", e => {
+    box.setPointerCapture(e.pointerId); pts.set(e.pointerId, local(e));
+    if (pts.size === 1) {
+      const p = local(e), onFrame = e.target.closest("#scanFrame");
+      mode = onFrame ? "drag" : "tap"; start = { p, cx: ScanPrefs.cx, cy: ScanPrefs.cy, moved: false };
+    } else if (pts.size === 2) {
+      const [a, b] = [...pts.values()]; mode = "pinch";
+      start = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, size: ScanPrefs.size, moved: true };
+    }
+  });
+  box.addEventListener("pointermove", e => {
+    if (!pts.has(e.pointerId) || !start) return;
+    pts.set(e.pointerId, local(e));
+    if (mode === "pinch" && pts.size >= 2) {
+      const [a, b] = [...pts.values()];
+      ScanPrefs.size = start.size * Math.hypot(a.x - b.x, a.y - b.y) / start.dist; placeFrame();
+    } else if (mode === "drag") {
+      const p = local(e), dx = p.x - start.p.x, dy = p.y - start.p.y;
+      if (!start.moved && Math.hypot(dx, dy) < 6) return;
+      start.moved = true;
+      ScanPrefs.cx = start.cx + dx / box.clientWidth * 100; ScanPrefs.cy = start.cy + dy / box.clientHeight * 100; placeFrame();
+    } else if (mode === "tap") {
+      const p = local(e); if (Math.hypot(p.x - start.p.x, p.y - start.p.y) >= 6) start.moved = true;
+    }
+  });
+  const end = e => {
+    if (!pts.has(e.pointerId)) return;
+    const p = pts.get(e.pointerId); pts.delete(e.pointerId);
+    if (pts.size) return;
+    if (start && !start.moved && mode !== "pinch") scanFocusAt(p.x, p.y);
+    if (start && start.moved) saveScanPrefs();
+    mode = ""; start = null;
+  };
+  box.addEventListener("pointerup", end); box.addEventListener("pointercancel", end);
+}
 const pause = ms => new Promise(r => setTimeout(r, ms));
 function scanUsable() { return ocrUsable() && window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
 function stopScan() {
   Scan.run++;
   if (Scan.stream) Scan.stream.getTracks().forEach(t => t.stop());
-  Scan.stream = null; Scan.track = null; Scan.torch = false;
+  clearTimeout(Scan.focusTimer);
+  Scan.stream = null; Scan.track = null; Scan.torch = false; Scan.caps = {};
 }
 function scanCrop(video, box, frame) {
   const vw = video.videoWidth, vh = video.videoHeight; if (!vw || !vh) return null;
@@ -835,10 +939,12 @@ async function startScan() {
     Scan.stream = stream; Scan.track = stream.getVideoTracks()[0];
     try {
       const caps = Scan.track.getCapabilities ? Scan.track.getCapabilities() : {};
-      if (caps.focusMode && caps.focusMode.includes("continuous")) Scan.track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
-      if (caps.torch) $("#scanTorch").hidden = false;
+      if (ScanPrefs.focus == null && caps.focusMode && caps.focusMode.includes("continuous")) Scan.track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
     } catch (e) {}
     const v = $("#scanVideo"); v.srcObject = stream; await v.play().catch(() => {});
+    placeFrame(); scanControls();
+    /* some phones only report zoom, focus and flash once the picture is running */
+    setTimeout(() => { if (run === Scan.run) scanControls(); }, 800);
     scanLoop(run);
   } catch (e) {
     if (run !== Scan.run) return;
@@ -855,14 +961,14 @@ async function scanLoop(run) {
   try { w = await ocrWorker(t => { if (run === Scan.run) hint.textContent = t; }); }
   catch (e) { if (run === Scan.run) hint.textContent = "The text reader couldn't load, so the camera can't read numbers. Tap Take photo now and search instead."; return; }
   if (run !== Scan.run) return;
-  const guide = "Fill the frame with the card, with its bottom edge in the yellow box.";
+  const guide = "Line the frame up with the card, with the card number inside the yellow box.";
   hint.textContent = guide;
   const started = Date.now(); let last = "", warned = false;
   while (run === Scan.run) {
     if (document.hidden || video.readyState < 2) { await pause(300); continue; }
     const card = scanCrop(video, box, frame); if (!card) { await pause(200); continue; }
     let r = null, text = "";
-    try { text = ((await w.recognize(scanStrip(card, 0.85, 0.15, 1.6))).data.text) || ""; r = matchOCR(text); } catch (e) {}
+    try { text = ((await w.recognize(scanStrip(card, 0.85, 0.15, Math.min(3, Math.max(1.4, 1000 / card.width))))).data.text) || ""; r = matchOCR(text); } catch (e) {}
     if (run !== Scan.run) return;
     if (r && r.number && r.cands.length) {
       const key = r.number.replace(/[^0-9A-Z\/]/gi, "").toUpperCase();
@@ -1085,22 +1191,44 @@ function renderAdd() {
   }
   if (add.step === "scan") {
     b.innerHTML = `
-      <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view"></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div></div>
+      <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view. Tap to focus."></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div><span class="scan-focus" id="scanFocus" aria-hidden="true"></span></div>
       <p class="muted" id="scanHint" role="status" style="margin:0">Starting the camera…</p>
+      <div class="scan-ctl">
+        <label>Frame size <input type="range" id="scanSize" min="30" max="100" step="1" value="${Math.round(ScanPrefs.size)}"></label>
+        <label id="scanZoomRow" hidden>Camera zoom <input type="range" id="scanZoom"></label>
+        <label id="scanFocusRow" hidden>Focus <input type="range" id="scanFocusDist"></label>
+        <p class="src" style="margin:0">Drag the frame to move it, pinch or use the slider to resize it, and tap the picture to focus. It remembers where you put it. <button class="linkbtn" type="button" id="scanReset">Reset frame</button></p>
+      </div>
       <div class="export-actions">
         <button class="btn primary" type="button" id="scanSnap">Take photo now</button>
-        <button class="btn" type="button" id="scanTorch" aria-pressed="false" hidden>Light</button>
+        <button class="btn" type="button" id="scanTorch" aria-pressed="false">Flash off</button>
         <button class="btn" type="button" id="scanBack">Back</button>
       </div>`;
+    placeFrame(); scanPointer($("#scanBox"));
+    $("#scanSize").addEventListener("input", e => { ScanPrefs.size = Number(e.target.value); placeFrame(); });
+    $("#scanSize").addEventListener("change", saveScanPrefs);
+    $("#scanReset").addEventListener("click", () => {
+      Object.assign(ScanPrefs, SCAN_FRAME); delete ScanPrefs.zoom; delete ScanPrefs.focus; saveScanPrefs(); placeFrame();
+      const t = Scan.track; if (!t) return;
+      const adv = {}; if (Scan.caps.zoom) adv.zoom = Scan.caps.zoom.min; if ((Scan.caps.focusMode || []).includes("continuous")) adv.focusMode = "continuous";
+      t.applyConstraints({ advanced: [adv] }).catch(() => {}); scanControls();
+    });
+    $("#scanZoom").addEventListener("input", e => { if (!Scan.track) return; ScanPrefs.zoom = Number(e.target.value); Scan.track.applyConstraints({ advanced: [{ zoom: ScanPrefs.zoom }] }).catch(() => {}); });
+    $("#scanZoom").addEventListener("change", saveScanPrefs);
+    $("#scanFocusDist").addEventListener("input", e => { if (!Scan.track) return; ScanPrefs.focus = Number(e.target.value); clearTimeout(Scan.focusTimer); Scan.track.applyConstraints({ advanced: [{ focusMode: "manual", focusDistance: ScanPrefs.focus }] }).catch(() => {}); });
+    $("#scanFocusDist").addEventListener("change", saveScanPrefs);
     $("#scanSnap").addEventListener("click", async () => {
       const card = Scan.stream && scanCrop($("#scanVideo"), $("#scanBox"), $("#scanFrame"));
       if (!card) return;
       const blob = await canvasBlob(card); stopScan(); takePhoto(blob);
     });
-    $("#scanTorch").addEventListener("click", e => {
-      if (!Scan.track) return; Scan.torch = !Scan.torch;
-      Scan.track.applyConstraints({ advanced: [{ torch: Scan.torch }] }).catch(() => {});
-      e.currentTarget.setAttribute("aria-pressed", String(Scan.torch)); e.currentTarget.textContent = Scan.torch ? "Light off" : "Light";
+    $("#scanTorch").addEventListener("click", async e => {
+      const btn = e.currentTarget; if (!Scan.track) return;
+      if (!Scan.caps.torch) { scanHintOnce("This browser doesn't let websites turn on the phone's flash. A lamp or the stand's light works instead."); return; }
+      const on = !Scan.torch;
+      try { await Scan.track.applyConstraints({ advanced: [{ torch: on }] }); Scan.torch = on; }
+      catch (err) { scanHintOnce("The flash couldn't be switched just now."); }
+      btn.setAttribute("aria-pressed", String(Scan.torch)); btn.textContent = Scan.torch ? "Flash on" : "Flash off";
     });
     $("#scanBack").addEventListener("click", () => { stopScan(); add.step = "pick"; renderAdd(); });
     return;
