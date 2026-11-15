@@ -1274,7 +1274,7 @@ function renderAdd() {
         <span class="thumb">${imgTag(cardImage(c), c.name)}</span>
         <span class="t"><b>${esc(c.name)}</b><span>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.rarity || "No rarity listed")}</span></span>
         <span class="tick" aria-hidden="true"></span></button>
-        <button class="btn primary cand-add" type="button" data-addcand="${esc(c.id)}" aria-label="Add ${esc(c.name)}, ${esc(c.set.name)} ${esc(c.number)}">Add</button></li>`).join("")}</ul>
+        <button class="btn ${add.chosen && add.chosen.id === c.id ? "primary " : ""}cand-add" type="button" data-addcand="${esc(c.id)}" aria-label="Add ${esc(c.name)}, ${esc(c.set.name)} ${esc(c.number)}">Add</button></li>`).join("")}</ul>
       <p class="src" style="margin:6px 0 0">Add saves it now. To set finish, copies or condition first, pick the card and use the options below.</p></div>` : (add.read && add.step !== "reading" ? `<p class="muted" style="margin:0">No catalogue match for that reading. Search below.</p>` : "");
 
   const showSearch = add.step === "search" || (add.step === "review" && ((!add.read && !add.ocr) || !add.cands.length || add.showSearch));
