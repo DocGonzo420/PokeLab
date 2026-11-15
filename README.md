@@ -14,8 +14,9 @@ Live site: https://docgonzo420.github.io/PokeLab/
 
 ## Gallery and decks
 
-- **Pictures:** choose whether the binder, gallery and card details show your photo or the catalogue picture.
+- **Pictures:** show your photo and the catalogue picture side by side (the default) in the binder, gallery and decks, or just one of them.
 - **Gallery tab:** your collection as a grid of cards that animate in, tilt toward the pointer, and show value, rarity, quantity and grade.
+- **Sorting:** presets for highest or lowest value, recently added, rarest first, best condition, set and number, and name, plus My order. In the gallery, Arrange cards lets you drag cards into your own order (press and hold first on a phone), or move them one place with the arrows.
 - **Downloads:** the binder and gallery can download the cards they show (all of them, or what your search and filters leave) as a spreadsheet (CSV) or as one picture of the cards in a grid with names, set numbers and prices, which you can preview, download or share. Over 96 cards, the picture is split into several.
 - **Decks tab:** build a 60-card deck by hand or around a Pokémon. It checks deck rules and format legality, counts what you already own and what's left to buy, and suggests cards to finish evolution lines, add energy and make the deck more consistent. Suggestions are rule-based, not tournament results. Each suggestion shows the card's price and the sets you can open it in. There's no free source for booster pack prices, so each set links to a TCGplayer search for its packs.
 
