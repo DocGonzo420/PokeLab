@@ -1905,14 +1905,17 @@ function shownNote(rows) {
   return n < all ? `the ${n} of your ${all} cards that your filters show` : `all ${n} of your card${n === 1 ? "" : "s"}`;
 }
 
-function loadImg(src) {
+function loadImg(src, retry) {
   return new Promise(res => {
     if (!src) return res(null);
     const im = new Image();
-    if (/^https?:/i.test(src) && new URL(src).origin !== location.origin) im.crossOrigin = "anonymous";
+    const cross = /^https?:/i.test(src) && new URL(src).origin !== location.origin;
+    if (cross) im.crossOrigin = "anonymous";
     const t = setTimeout(() => res(null), 15000);
     im.onload = () => { clearTimeout(t); res(im.naturalWidth ? im : null); };
-    im.onerror = () => { clearTimeout(t); res(null); };
+    // A copy the page already showed can sit in the browser's cache without the header a drawing needs,
+    // so ask once more for a fresh copy before giving up.
+    im.onerror = () => { clearTimeout(t); res(cross && !retry ? loadImg(src + (src.includes("?") ? "&" : "?") + "pl=export", true) : null); };
     im.src = src;
   });
 }
