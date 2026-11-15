@@ -124,6 +124,14 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .picker{height:96px;border-radius:14px;border:1.5px dashed var(--line);background:var(--sunk);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;font-weight:600;position:relative}
 .picker small{font-weight:400;color:var(--muted);font-size:12px}
 .picker input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.picker.wide{grid-column:1/-1;height:84px;border-style:solid;border-color:var(--accent);font:inherit;font-weight:600;color:inherit}
+.add-err{margin:0;color:var(--warn);font-size:13.5px}
+.scan{position:relative;width:100%;max-width:440px;margin:0 auto;aspect-ratio:3/4;max-height:64vh;border-radius:14px;overflow:hidden;background:#000}
+.scan video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.scan-frame{position:absolute;left:50%;top:50%;height:86%;aspect-ratio:63/88;transform:translate(-50%,-50%);border:3px solid rgba(255,255,255,.92);border-radius:12px;box-shadow:0 0 0 999px rgba(0,0,0,.45);transition:border-color .2s}
+.scan-num{position:absolute;left:4%;right:4%;bottom:2%;height:12%;border:2px dashed #ffd36b;border-radius:6px}
+.scan.seen .scan-frame{border-color:#8be0a4}
+.scan.seen .scan-num{border-color:#8be0a4;border-style:solid}
 
 .shot{display:grid;grid-template-columns:110px 1fr;gap:14px;align-items:start}
 .shot img{width:110px;aspect-ratio:63/88;object-fit:cover;border-radius:8px;background:var(--sunk);max-width:100%}
@@ -790,6 +798,100 @@ function ocrWorker(onStatus) {
   })().catch(e => { OCR.loading = null; throw e; });
   return OCR.loading;
 }
+/* live camera scan: reads the collector number from the video, like a barcode scanner */
+const Scan = { stream: null, track: null, run: 0, torch: false };
+const pause = ms => new Promise(r => setTimeout(r, ms));
+function scanUsable() { return ocrUsable() && window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+function stopScan() {
+  Scan.run++;
+  if (Scan.stream) Scan.stream.getTracks().forEach(t => t.stop());
+  Scan.stream = null; Scan.track = null; Scan.torch = false;
+}
+function scanCrop(video, box, frame) {
+  const vw = video.videoWidth, vh = video.videoHeight; if (!vw || !vh) return null;
+  const b = box.getBoundingClientRect(), f = frame.getBoundingClientRect(); if (!b.width || !f.width) return null;
+  const s = Math.max(b.width / vw, b.height / vh), ox = (b.width - vw * s) / 2, oy = (b.height - vh * s) / 2;
+  let x = (f.left - b.left - ox) / s, y = (f.top - b.top - oy) / s, w = f.width / s, h = f.height / s;
+  x = Math.max(0, x); y = Math.max(0, y); w = Math.min(vw - x, w); h = Math.min(vh - y, h);
+  const k = Math.min(1, 1100 / h);
+  const cv = document.createElement("canvas"); cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+  cv.getContext("2d").drawImage(video, x, y, w, h, 0, 0, cv.width, cv.height);
+  return cv;
+}
+function scanStrip(card, top, height, scale) {
+  const sy = Math.round(card.height * top), sh = Math.round(card.height * height);
+  const cv = document.createElement("canvas"); cv.width = Math.round(card.width * scale); cv.height = Math.round(sh * scale);
+  const ctx = cv.getContext("2d"); ctx.filter = "grayscale(1) contrast(1.35)";
+  ctx.drawImage(card, 0, sy, card.width, sh, 0, 0, cv.width, cv.height);
+  return cv;
+}
+const canvasBlob = cv => new Promise(res => cv.toBlob(res, "image/jpeg", 0.88));
+async function startScan() {
+  add.err = ""; add.step = "scan"; renderAdd();
+  const run = ++Scan.run;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    if (run !== Scan.run || add.step !== "scan") { stream.getTracks().forEach(t => t.stop()); return; }
+    Scan.stream = stream; Scan.track = stream.getVideoTracks()[0];
+    try {
+      const caps = Scan.track.getCapabilities ? Scan.track.getCapabilities() : {};
+      if (caps.focusMode && caps.focusMode.includes("continuous")) Scan.track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+      if (caps.torch) $("#scanTorch").hidden = false;
+    } catch (e) {}
+    const v = $("#scanVideo"); v.srcObject = stream; await v.play().catch(() => {});
+    scanLoop(run);
+  } catch (e) {
+    if (run !== Scan.run) return;
+    stopScan();
+    add.err = e && (e.name === "NotAllowedError" || e.name === "SecurityError")
+      ? "Camera access is off for this site. Allow it in your browser's settings, or use Take photo."
+      : "The camera couldn't start here. Use Take photo instead.";
+    add.step = "pick"; renderAdd();
+  }
+}
+async function scanLoop(run) {
+  const video = $("#scanVideo"), box = $("#scanBox"), frame = $("#scanFrame"), hint = $("#scanHint");
+  let w;
+  try { w = await ocrWorker(t => { if (run === Scan.run) hint.textContent = t; }); }
+  catch (e) { if (run === Scan.run) hint.textContent = "The text reader couldn't load, so the camera can't read numbers. Tap Take photo now and search instead."; return; }
+  if (run !== Scan.run) return;
+  const guide = "Fill the frame with the card, with its bottom edge in the yellow box.";
+  hint.textContent = guide;
+  const started = Date.now(); let last = "", warned = false;
+  while (run === Scan.run) {
+    if (document.hidden || video.readyState < 2) { await pause(300); continue; }
+    const card = scanCrop(video, box, frame); if (!card) { await pause(200); continue; }
+    let r = null, text = "";
+    try { text = ((await w.recognize(scanStrip(card, 0.85, 0.15, 1.6))).data.text) || ""; r = matchOCR(text); } catch (e) {}
+    if (run !== Scan.run) return;
+    if (r && r.number && r.cands.length) {
+      const key = r.number.replace(/[^0-9A-Z\/]/gi, "").toUpperCase();
+      if (key === last) return scanFound(run, card, text, r, w);
+      last = key; box.classList.add("seen"); hint.textContent = `Reading ${r.number}… hold still`;
+    } else {
+      if (last) hint.textContent = warned ? hint.textContent : guide;
+      last = ""; box.classList.remove("seen");
+    }
+    if (!warned && Date.now() - started > 12000) { warned = true; hint.textContent = "Can't read the number yet. Try more light, hold the card flat, or tap Take photo now."; }
+    await pause(120);
+  }
+}
+async function scanFound(run, card, stripText, r, w) {
+  $("#scanHint").textContent = `Read ${r.number}. Finding the card…`;
+  let topText = "";
+  try { topText = ((await w.recognize(scanStrip(card, 0.02, 0.13, 1))).data.text) || ""; } catch (e) {}
+  if (run !== Scan.run) return;
+  const both = matchOCR(topText + "\n" + stripText);
+  const blob = await canvasBlob(card);
+  if (run !== Scan.run) return;
+  stopScan();
+  try { navigator.vibrate && navigator.vibrate(40); } catch (e) {}
+  if (add.url) URL.revokeObjectURL(add.url);
+  add.photoBlob = blob; add.blob = blob; add.url = URL.createObjectURL(blob);
+  add.ocr = { number: r.number, live: true };
+  add.cands = both.cands.length ? both.cands : r.cands; add.chosen = add.cands[0] || null;
+  add.step = "review"; renderAdd();
+}
 async function readByOCR(blob, onStatus) {
   const w = await ocrWorker(onStatus);
   onStatus && onStatus("Reading the card number…");
@@ -969,7 +1071,8 @@ function resetAdd() { Object.assign(add, { blob: null, photoBlob: null, url: "",
 resetAdd();
 const CONDS = [["", "Not set"], ["9", "Near Mint, looks perfect (about 9)"], ["8", "Near Mint, tiny flaw (about 8)"], ["6", "Lightly played (about 6)"], ["4", "Moderately played (about 4)"], ["2", "Heavily played or damaged (about 2)"]];
 const condOptions = g => CONDS.map(([v, l]) => `<option value="${v}" ${String(g ?? "") === v ? "selected" : ""}>${l}</option>`).join("");
-function openAdd() { resetAdd(); renderAdd(); $("#addSheet").showModal(); }
+function openAdd() { stopScan(); resetAdd(); renderAdd(); $("#addSheet").showModal(); }
+$("#addSheet").addEventListener("close", stopScan);
 function renderAdd() {
   const b = $("#addBody");
   const aiOn = AI.sample && AI.images;
@@ -980,16 +1083,42 @@ function renderAdd() {
     });
     return;
   }
+  if (add.step === "scan") {
+    b.innerHTML = `
+      <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view"></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div></div>
+      <p class="muted" id="scanHint" role="status" style="margin:0">Starting the camera…</p>
+      <div class="export-actions">
+        <button class="btn primary" type="button" id="scanSnap">Take photo now</button>
+        <button class="btn" type="button" id="scanTorch" aria-pressed="false" hidden>Light</button>
+        <button class="btn" type="button" id="scanBack">Back</button>
+      </div>`;
+    $("#scanSnap").addEventListener("click", async () => {
+      const card = Scan.stream && scanCrop($("#scanVideo"), $("#scanBox"), $("#scanFrame"));
+      if (!card) return;
+      const blob = await canvasBlob(card); stopScan(); takePhoto(blob);
+    });
+    $("#scanTorch").addEventListener("click", e => {
+      if (!Scan.track) return; Scan.torch = !Scan.torch;
+      Scan.track.applyConstraints({ advanced: [{ torch: Scan.torch }] }).catch(() => {});
+      e.currentTarget.setAttribute("aria-pressed", String(Scan.torch)); e.currentTarget.textContent = Scan.torch ? "Light off" : "Light";
+    });
+    $("#scanBack").addEventListener("click", () => { stopScan(); add.step = "pick"; renderAdd(); });
+    return;
+  }
   if (add.step === "pick") {
+    const live = scanUsable() && !aiOn;
     b.innerHTML = `
       <p class="muted" style="margin:0">${aiOn ? "Photograph the front of the card, flat and filling most of the frame. Claude reads the name, number and set, then checks condition." : ocrUsable() ? "Photograph the front of the card, flat, straight on and filling most of the frame. The app reads the collector number at the bottom to find it." : "Add a photo of the front, then find the card by name or number."}</p>
+      ${add.err ? `<p class="add-err" role="alert">${esc(add.err)}</p>` : ""}
       <div class="pickers">
+        ${live ? `<button class="picker wide" type="button" id="scanBtn">Scan with camera<small>Hold the card up and the number is read live</small></button>` : ""}
         <label class="picker">Take photo<small>Camera</small><input id="camIn" type="file" accept="image/*" capture="environment"></label>
         <label class="picker">Choose photo<small>From your library</small><input id="libIn" type="file" accept="image/*"></label>
       </div>
       <div><button class="linkbtn" type="button" id="skipPhoto">Add without a photo</button></div>`;
     const onFile = e => { const f = e.target.files && e.target.files[0]; if (f) takePhoto(f); };
     $("#camIn").addEventListener("change", onFile); $("#libIn").addEventListener("change", onFile);
+    if (live) $("#scanBtn").addEventListener("click", startScan);
     $("#skipPhoto").addEventListener("click", () => { add.step = "search"; renderAdd(); });
     return;
   }
@@ -1004,7 +1133,7 @@ function renderAdd() {
     else if (r.language && !/english/i.test(r.language)) statusHtml += `<span class="err">This looks like a ${esc(r.language)} card. The catalogue lists English cards, so pick the closest English printing.</span>`;
   } else if (add.ocr) {
     statusHtml = add.ocr.number
-      ? `<span class="line">Read <span class="mono">${esc(add.ocr.number)}</span> from your photo</span><span class="read">${add.cands.length ? "Check it's the right card." : "No card has that number. Search below."}</span>`
+      ? `<span class="line">Read <span class="mono">${esc(add.ocr.number)}</span> ${add.ocr.live ? "with the camera" : "from your photo"}</span><span class="read">${add.cands.length ? "Check it's the right card." : "No card has that number. Search below."}</span>`
       : `<span class="line">Couldn't read the number</span><span class="read">${add.cands.length ? "These names showed up in the photo." : "Search below, or try a sharper, closer photo."}</span>`;
   } else if (add.photoBlob) statusHtml = `<span class="line">Photo added</span><span class="read">${aiOn ? "" : "Find the card below."}</span>`;
   if (add.err) statusHtml += `<span class="err">${esc(add.err)}</span>`;
