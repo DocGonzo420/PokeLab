@@ -14,6 +14,7 @@
 <title>Poke Lab</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="deck.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,600..800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
 <style>
 /* Layout: a binder page. Sticky value header, filter strip, one column of sleeves (rows), a fixed Add button. Sheets slide up for adding and for card details. */
@@ -1091,6 +1092,9 @@ $("#fSort").addEventListener("change", e => { view.sort = e.target.value; try { 
 try { const s = localStorage.getItem("pokelab-sort"); if (s) { view.sort = s; $("#fSort").value = s; } } catch (x) {}
 Store.onChange(() => { renderList(); if ($("#detailSheet").open) renderDetail(); });
 
+/* shared with deck.js (the Deck Builder), which reads the same saved collection */
+window.PokeLab = { Cat, Store, cardImage, esc, norm, normNum, toast, searchCatalogue };
+
 (async function boot() {
   $("#filters").hidden = true; $("#empty").hidden = false;
   const cat = loadCatalogue().catch(() => Notices.show("cat", "The card catalogue didn't load, so new cards can't be matched. Reopen the page to try again.", false));
@@ -1105,6 +1109,7 @@ Store.onChange(() => { renderList(); if ($("#detailSheet").open) renderDetail();
 })();
 </script>
 
+<script src="deck.js"></script>
 <script>if("serviceWorker" in navigator&&location.protocol==="https:"){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script>
 </body>
 </html>

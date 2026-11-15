@@ -1,6 +1,6 @@
 // Poke Lab service worker: app files work offline; prices and card images always come from the network.
-const CACHE = "poke-lab-v4";
-const SHELL = ["./", "index.html", "cards.json", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
+const CACHE = "poke-lab-v5";
+const SHELL = ["./", "index.html", "cards.json", "deck.js", "deck.css", "deck.json", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", e => {
