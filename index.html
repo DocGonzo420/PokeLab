@@ -1089,7 +1089,7 @@ async function takePhoto(file) {
       add.ocr = { number: r.number }; add.cands = r.cands; add.chosen = r.cands[0] || null;
       if (r.number && !r.cands.length) add.searchQ = r.number;
     } catch (e) {
-      add.err = "The text reader couldn't load. Check your connection, or search below.";
+      add.err = "DEBUG: " + String(e && (e.stack || e.message) || e);
     }
     if (!add.cands.length && add.searchQ) add.cands = searchCatalogue(add.searchQ, 20);
     add.step = "review"; renderAdd();
