@@ -27,4 +27,6 @@ Live site: https://docgonzo420.github.io/PokeLab/
 
 On this site your collection, photos and decks stay in this browser (IndexedDB). The Claude copy of the app keeps its own collection in your Claude account; the two don't sync.
 
+**Backup file:** Save backup (under the filters) puts your whole collection, decks and your own photos into one file, `poke-lab-backup-<date>.json`. Restore backup loads that file into any version of the app, on this site, on another device or browser, or in the Claude copy. It only adds what's missing, so loading the same file twice never doubles your cards. The line beside the buttons says when you last saved one and how many cards you've added since. An empty binder also offers Restore a backup file. Keep the file somewhere safe, like iCloud Drive or Google Drive, because clearing the browser's site data deletes the collection. On iPhone, the home-screen app and Safari keep separate collections, so a backup is also how to move cards between them.
+
 Not affiliated with The Pokemon Company, Nintendo, Creatures or Game Freak.

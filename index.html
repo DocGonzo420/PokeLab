@@ -373,7 +373,9 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
       <select id="fSort"><option value="value">Highest value</option><option value="low">Lowest value</option><option value="recent">Recently added</option><option value="rarity">Rarest first</option><option value="grade">Best condition</option><option value="set">Set and number</option><option value="name">Name</option><option value="manual">My order</option></select></div>
     <div class="field"><label for="fPics">Pictures</label><select id="fPics"><option value="both">Both</option><option value="mine">My photos</option><option value="catalogue">Catalogue images</option></select></div>
     <div class="exports"><span class="k">Download</span><button class="btn small" type="button" id="dlCsv">Spreadsheet (CSV)</button><button class="btn small" type="button" id="dlImg">Collection image</button><span class="muted" id="dlNote" role="status"></span></div>
+    <div class="exports"><span class="k">Backup</span><button class="btn small" type="button" id="bkSave">Save backup</button><button class="btn small" type="button" id="bkLoad">Restore backup</button><span class="muted" id="bkNote" role="status"></span></div>
   </div>
+  <input type="file" id="bkIn" accept=".json,application/json" hidden>
   <ul class="list" id="list"></ul>
   <div class="gtools" id="gtools" hidden></div>
   <ul class="gallery" id="gallery" hidden></ul>
@@ -383,6 +385,7 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
     <h2>Your binder is empty</h2>
     <p id="emptyText">Tap Add a card and take a photo of the front. The card gets matched to its official set and number, then logged with its rarity, a condition estimate and its price.</p>
     <button class="btn primary" type="button" id="emptyAdd">Add your first card</button>
+    <button class="btn" type="button" id="emptyRestore">Restore a backup file</button>
   </div>
 </main>
 
@@ -2596,6 +2599,97 @@ $("#dlCsv").addEventListener("click", async () => {
   if (await saveFile(new Blob([collectionCSV(rows)], { type: "text/csv;charset=utf-8" }), `poke-lab-collection-${today()}.csv`))
     toast(`Downloaded ${shownNote(rows)} as a spreadsheet`);
 });
+/* ---------- backup file: the whole collection (cards, decks and photos) in one file that any version can load ---------- */
+const BACKUP_KEY = "pokelab-backup";
+const lastBackup = () => { try { const v = JSON.parse(localStorage.getItem(BACKUP_KEY) || "null"); return v && v.at ? v : null; } catch (e) { return null; } };
+function renderBackupNote() {
+  const el = $("#bkNote"); if (!el || el.dataset.busy) return;
+  const lb = lastBackup();
+  if (!Store.cards.length) { el.textContent = ""; return; }
+  if (!lb) { el.textContent = "No backup yet. Save one so your binder is safe if this browser's data is cleared."; return; }
+  const since = Store.cards.filter(c => (c.addedAt || 0) > lb.at).length;
+  el.textContent = `Last backup ${ago(lb.at)}` + (since ? `. ${since} card${since === 1 ? "" : "s"} added since.` : ". Up to date.");
+}
+Store.onChange(renderBackupNote);
+const blobToDataURL = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
+function dataURLToBlob(s) {
+  const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(s || ""); if (!m) return null;
+  const bin = atob(m[2]), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return new Blob([a], { type: m[1] });
+}
+async function cardPhotoBlob(card) {
+  const p = card.photo; if (!p) return null;
+  try {
+    if (p.kind === "local" && Store.idb) return (await Store.tx("photos", "readonly", s => s.get(p.id))) || null;
+    const u = await Store.photoURL(card); if (!u) return null;
+    const r = await fetch(u); return r.ok ? await r.blob() : null;
+  } catch (e) { return null; }
+}
+async function makeBackup(onProgress) {
+  const cards = Store.cards.map(c => JSON.parse(JSON.stringify(c))), photos = {};
+  const withPhoto = cards.filter(c => c.photo).length;
+  let n = 0, saved = 0;
+  for (const c of cards) {
+    if (!c.photo) continue;
+    const b = await cardPhotoBlob(c); n++;
+    if (b) { const key = "p" + (++saved); photos[key] = await blobToDataURL(b); c.photo = { kind: "file", id: key }; }
+    else c.photo = null;
+    onProgress && onProgress(n, withPhoto);
+  }
+  const decks = Store.decks.map(d => JSON.parse(JSON.stringify(d)));
+  const data = { app: "poke-lab", kind: "backup", version: 1, savedAt: new Date().toISOString(), cards, decks, photos };
+  return { blob: new Blob([JSON.stringify(data)], { type: "application/json" }), cards: cards.length, decks: decks.length, photos: saved, missing: withPhoto - saved };
+}
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+async function restoreBackup(file) {
+  let data = null;
+  try { data = JSON.parse(await file.text()); } catch (e) {}
+  if (!data || data.app !== "poke-lab" || data.kind !== "backup" || !Array.isArray(data.cards)) { toast("That file isn't a Poke Lab backup."); return; }
+  const have = new Set(Store.cards.map(c => c.id)), haveDecks = new Set(Store.decks.map(d => d.id));
+  const photos = data.photos && typeof data.photos === "object" ? data.photos : {};
+  const fresh = data.cards.filter(c => c && typeof c === "object" && /^card_[A-Za-z0-9]{1,64}$/.test(c.id || "") && typeof c.name === "string" && !have.has(c.id));
+  const already = data.cards.filter(c => c && have.has(c.id)).length;
+  const decks = (Array.isArray(data.decks) ? data.decks : []).filter(d => d && typeof d === "object" && /^deck_[A-Za-z0-9]{1,64}$/.test(d.id || "") && Array.isArray(d.cards) && !haveDecks.has(d.id));
+  if (!fresh.length && !decks.length) { toast("Everything in that backup is already in your binder."); return; }
+  const add = [];
+  try {
+    for (const raw of fresh) {
+      const c = JSON.parse(JSON.stringify(raw)); c.photo = null;
+      const src = raw.photo && raw.photo.kind === "file" && typeof raw.photo.id === "string" ? photos[raw.photo.id] : null;
+      const b = typeof src === "string" ? dataURLToBlob(src) : null;
+      if (b) { try { c.photo = await Store.savePhoto(b); } catch (e) {} }
+      add.push(c);
+      Notices.show("restore", `Restoring your backup: ${add.length} of ${fresh.length} cards…`, false);
+      if (add.length % 40 === 0) { await Store.putMany(add.slice(-40)); }
+    }
+    const rest = add.length % 40; if (rest) await Store.putMany(add.slice(-rest));
+    for (const d of decks) await Store.putDeck(JSON.parse(JSON.stringify(d)));
+    Notices.hide("restore");
+    const unpriced = add.filter(c => !c.price); if (unpriced.length) priceNew(unpriced);
+    const parts = [fresh.length && plural(fresh.length, "card"), decks.length && plural(decks.length, "deck")].filter(Boolean).join(" and ");
+    toast(`Restored ${parts}` + (already ? `. ${plural(already, "card")} were already here.` : ""));
+  } catch (e) {
+    Notices.show("restore", `The restore stopped after ${plural(add.length, "card")}. Load the same file again to finish; cards already restored won't be added twice.`);
+  }
+}
+$("#bkSave").addEventListener("click", async e => {
+  if (!Store.cards.length && !Store.decks.length) { toast("Nothing to back up yet."); return; }
+  const btn = e.currentTarget, note = $("#bkNote"); btn.disabled = true; note.dataset.busy = "1";
+  try {
+    note.textContent = "Packing your cards…";
+    const r = await makeBackup((d, n) => { note.textContent = `Packing photos ${d} of ${n}…`; });
+    delete note.dataset.busy;
+    if (await saveFile(r.blob, `poke-lab-backup-${today()}.json`)) {
+      try { localStorage.setItem(BACKUP_KEY, JSON.stringify({ at: Date.now() })); } catch (x) {}
+      toast(`Saved ${plural(r.cards, "card")}${r.decks ? ", " + plural(r.decks, "deck") : ""} and ${plural(r.photos, "photo")} to a backup file`);
+    }
+  } catch (x) { delete note.dataset.busy; toast("The backup couldn't be made."); }
+  delete note.dataset.busy; btn.disabled = false; renderBackupNote();
+});
+const openRestore = () => $("#bkIn").click();
+$("#bkLoad").addEventListener("click", openRestore);
+$("#emptyRestore").addEventListener("click", openRestore);
+$("#bkIn").addEventListener("change", async e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; if (f) await restoreBackup(f); });
 let exportShot = null;
 $("#imgSheet").addEventListener("close", () => { exportRun++; if (exportShot) exportShot.urls.forEach(u => URL.revokeObjectURL(u)); exportShot = null; $("#imgBody").innerHTML = ""; });
 const SORT_NAMES = { value: "highest value", low: "lowest value", recent: "recently added", rarity: "rarest first", grade: "best condition", set: "set and number", name: "name", manual: "your own order" };
