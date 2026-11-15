@@ -196,6 +196,79 @@ tr.mine td{background:var(--sunk);font-weight:600}
 .cen-read{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .cen-read .fact .v{font:700 20px/1.1 var(--f-display);font-stretch:85%;font-variant-numeric:tabular-nums}
 .key-outer{color:var(--accent);font-weight:600}.key-inner{color:var(--focus);font-weight:600}
+
+/* Tabs */
+.top .tabs{display:flex;justify-content:flex-start;align-items:stretch;flex-wrap:nowrap;gap:4px;padding-block:2px 0}
+.tab{flex:0 0 auto;height:40px;padding:0 14px;border:0;border-bottom:3px solid transparent;background:none;cursor:pointer;font:700 15px/1 var(--f-display);font-stretch:90%;letter-spacing:.02em;color:var(--muted)}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+body[data-tab="gallery"] .wrap{max-width:1200px}
+@media (min-width:620px){.filters{grid-template-columns:2fr 1fr 1fr 1fr 1fr}}
+
+/* Gallery: a lit display wall. Cards rise into place as they scroll in, tilt toward the pointer, and carry their value on a label strip. */
+.gallery{list-style:none;margin:14px 0 120px;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
+@media (min-width:620px){.gallery{grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:18px}}
+.gcard{opacity:0;transform:translateY(18px) scale(.97);transition:opacity .45s ease,transform .55s cubic-bezier(.2,.8,.2,1);transition-delay:calc(var(--i,0) * 40ms)}
+.gcard.in{opacity:1;transform:none}
+.gbtn{all:unset;box-sizing:border-box;display:block;width:100%;cursor:pointer;border-radius:4.6%/3.3%;position:relative;aspect-ratio:63/88;background:var(--sunk);overflow:hidden;
+  transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .25s ease,box-shadow .25s ease;box-shadow:0 6px 18px rgb(0 0 0 / .18)}
+.gbtn:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+.gbtn:hover{box-shadow:0 14px 34px rgb(0 0 0 / .28)}
+.gbtn.tilting{transition:transform .06s linear,box-shadow .25s ease}
+.gimg,.gimg img{position:absolute;inset:0;width:100%;height:100%}
+.gimg img{object-fit:cover;display:block}
+.gimg .ph{position:absolute;inset:0;height:100%;border-radius:0}
+.gsheen{position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:color-dodge;transition:opacity .3s ease;
+  background:radial-gradient(circle at var(--mx,50%) var(--my,30%),rgb(255 255 255 / .55),transparent 45%),linear-gradient(115deg,transparent 30%,rgb(255 120 180 / .25) 42%,rgb(120 220 255 / .25) 52%,rgb(255 230 120 / .2) 62%,transparent 72%)}
+.gcard.t-ultra .gbtn:hover .gsheen,.gcard.t-secret .gbtn:hover .gsheen,.gcard.t-rare .gbtn:hover .gsheen{opacity:.85}
+.gov{position:absolute;left:0;right:0;bottom:0;padding:28px 10px 9px;color:#fff;background:linear-gradient(to top,rgb(8 10 14 / .92),rgb(8 10 14 / .7) 55%,transparent);display:flex;flex-direction:column;gap:3px;
+  transform:translateY(0);transition:transform .3s ease}
+.gov .gname{font-weight:600;font-size:13.5px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gov .gset{font:500 11px/1.2 var(--f-mono);opacity:.82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gov .grow{display:flex;align-items:flex-end;justify-content:space-between;gap:6px;margin-top:2px}
+.gov .gval{font:800 20px/1 var(--f-display);font-stretch:82%;font-variant-numeric:tabular-nums}
+.gov .gval.none{opacity:.6;font-size:14px}
+.grar{font-size:10px;font-weight:700;letter-spacing:.02em;padding:2px 6px;border-radius:999px;background:rgb(255 255 255 / .16);border:1px solid rgb(255 255 255 / .35);white-space:nowrap;max-width:60%;overflow:hidden;text-overflow:ellipsis}
+.gcard.t-ultra .grar{background:rgb(150 100 230 / .45)}.gcard.t-secret .grar{background:rgb(200 150 30 / .5)}.gcard.t-rare .grar{background:rgb(70 120 220 / .45)}
+.gbadge{position:absolute;top:8px;font:700 11px/1 var(--f-body);padding:4px 7px;border-radius:999px;background:rgb(8 10 14 / .78);color:#fff}
+.gbadge.qty{left:8px}.gbadge.grade{right:8px}
+@media (prefers-reduced-motion:reduce){.gcard{opacity:1;transform:none;transition:none}.gbtn,.gov{transition:none;transform:none}}
+
+/* Decks */
+.decks{margin:14px 0 120px;display:flex;flex-direction:column;gap:14px}
+.dk-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.dk-head h2{margin:0;font:800 22px/1.1 var(--f-display);font-stretch:85%}
+.card-box{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px}
+.dk-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.dk-item{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);cursor:pointer;width:100%;text-align:left}
+.dk-item:hover{border-color:var(--muted)}
+.dk-item b{display:block;font-weight:600}
+.dk-item span{font-size:12.5px;color:var(--muted)}
+.meter{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.meter .fact .v{font:800 22px/1.05 var(--f-display);font-stretch:82%;font-variant-numeric:tabular-nums}
+@media (max-width:480px){.meter{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.ok{color:var(--ok)}.warnc{color:var(--warn)}
+.probs{margin:0;padding-left:18px;font-size:13.5px;display:flex;flex-direction:column;gap:3px}
+.dk-group h3{margin:0 0 6px;font:700 13px/1.2 var(--f-body);text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.dk-line{display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+.dk-line:last-child{border-bottom:0}
+.dk-line .thumb{width:34px}
+.dk-line .t{min-width:0}
+.dk-line .t b{display:block;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dk-line .t span{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stepper{display:flex;align-items:center;gap:4px}
+.stepper button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:16px;line-height:1}
+.stepper output{min-width:22px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
+.sug{display:grid;grid-template-columns:42px 1fr auto;gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--line)}
+.sug:last-child{border-bottom:0}
+.sug .thumb{width:42px}
+.sug .t{min-width:0;display:flex;flex-direction:column;gap:2px}
+.sug .t b{font-weight:600}
+.sug .why{font-size:13px}
+.sug .meta{font-size:12px;color:var(--muted)}
+.sug .meta a{color:var(--focus)}
+.sug-h{margin:4px 0 0;font:700 13px/1.2 var(--f-body);text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.inline-check{display:flex;align-items:center;gap:8px;font-size:14px}
+.inline-check input{width:18px;height:18px}
 </style>
 
 </head>
@@ -212,6 +285,11 @@ tr.mine td{background:var(--sunk);font-weight:600}
       <div class="meta" id="totalMeta">0 cards</div>
     </div>
   </div>
+  <nav class="wrap tabs" role="tablist" aria-label="Views">
+    <button class="tab" type="button" role="tab" id="tab-binder" data-tab="binder" aria-selected="true">Binder</button>
+    <button class="tab" type="button" role="tab" id="tab-gallery" data-tab="gallery" aria-selected="false">Gallery</button>
+    <button class="tab" type="button" role="tab" id="tab-decks" data-tab="decks" aria-selected="false">Decks</button>
+  </nav>
   <div class="holo-rule"></div>
 </header>
 
@@ -223,8 +301,11 @@ tr.mine td{background:var(--sunk);font-weight:600}
     <div class="field"><label for="fRarity">Rarity</label><select id="fRarity"><option value="">All rarities</option></select></div>
     <div class="field"><label for="fSort">Sort</label>
       <select id="fSort"><option value="value">Highest value</option><option value="recent">Recently added</option><option value="set">Set and number</option><option value="name">Name</option></select></div>
+    <div class="field"><label for="fPics">Pictures</label><select id="fPics"><option value="mine">My photos</option><option value="catalogue">Catalogue images</option></select></div>
   </div>
   <ul class="list" id="list"></ul>
+  <ul class="gallery" id="gallery" hidden></ul>
+  <section class="decks" id="decks" hidden aria-label="Decks"></section>
   <div class="empty" id="empty" hidden>
     <div class="sleeve" aria-hidden="true"></div>
     <h2>Your binder is empty</h2>
@@ -503,7 +584,7 @@ async function fetchPrices(cards) {
 
 /* ---------- storage: Claude's store when available, else this browser ---------- */
 const Store = {
-  mode: "none", cards: [], listeners: [], db: null, assets: null, uid: null, idb: null, urls: new Map(),
+  mode: "none", cards: [], decks: [], listeners: [], db: null, assets: null, uid: null, idb: null, urls: new Map(),
   onChange(fn) { this.listeners.push(fn); },
   emit() { for (const f of this.listeners) f(this.cards); },
   async init() {
@@ -519,6 +600,7 @@ const Store = {
             const timer = setTimeout(() => { Notices.show("slow", "Your saved cards are taking a while to load. They'll appear here when the connection catches up."); finish(); }, 10000);
             this.col.onSnapshot(snap => {
               this.cards = snap.docs.filter(d => d.id.startsWith("card_")).map(d => ({ ...d.data(), id: d.id }));
+              this.decks = snap.docs.filter(d => d.id.startsWith("deck_")).map(d => ({ ...d.data(), id: d.id }));
               if (!snap.metadata.fromCache) { clearTimeout(timer); Notices.hide("slow"); }
               this.emit(); finish();
             }, err => { clearTimeout(timer); Notices.show("dberr", "Your saved cards couldn't load just now. Reopen the page to try again."); finish(); });
@@ -531,12 +613,18 @@ const Store = {
   async initLocal() {
     try {
       this.idb = await new Promise((res, rej) => {
-        const r = indexedDB.open("poke-lab", 1);
-        r.onupgradeneeded = () => { r.result.createObjectStore("cards", { keyPath: "id" }); r.result.createObjectStore("photos"); };
+        const r = indexedDB.open("poke-lab", 2);
+        r.onupgradeneeded = e => {
+          const db = r.result;
+          if (!db.objectStoreNames.contains("cards")) db.createObjectStore("cards", { keyPath: "id" });
+          if (!db.objectStoreNames.contains("photos")) db.createObjectStore("photos");
+          if (!db.objectStoreNames.contains("decks")) db.createObjectStore("decks", { keyPath: "id" });
+        };
         r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
       });
       this.mode = "local";
       this.cards = await this.tx("cards", "readonly", s => s.getAll());
+      this.decks = await this.tx("decks", "readonly", s => s.getAll());
     } catch (e) {
       this.mode = "memory"; this.cards = [];
       Notices.show("mem", "This browser isn't letting the page save, so cards you add will be gone when you close it.");
@@ -574,6 +662,21 @@ const Store = {
     const i = this.cards.findIndex(c => c.id === id);
     if (i >= 0) this.cards[i] = full; else this.cards.push(full);
     if (this.mode === "local") await this.tx("cards", "readwrite", s => s.put(full));
+    this.emit();
+  },
+  async putDeck(deck) {
+    const clean = JSON.parse(JSON.stringify(deck)); const id = clean.id; delete clean.id;
+    if (this.mode === "cloud") { await this.col.doc(id).set(clean); return; }
+    const full = { ...clean, id };
+    const i = this.decks.findIndex(d => d.id === id);
+    if (i >= 0) this.decks[i] = full; else this.decks.push(full);
+    if (this.mode === "local") await this.tx("decks", "readwrite", s => s.put(full));
+    this.emit();
+  },
+  async removeDeck(deck) {
+    if (this.mode === "cloud") { await this.col.doc(deck.id).delete(); return; }
+    this.decks = this.decks.filter(d => d.id !== deck.id);
+    if (this.mode === "local") await this.tx("decks", "readwrite", s => s.delete(deck.id));
     this.emit();
   },
   async remove(card) {
@@ -696,7 +799,7 @@ function imgTag(src, alt, cls = "") {
 }
 
 /* ---------- collection view ---------- */
-const view = { q: "", set: "", rarity: "", sort: "value" };
+const view = { q: "", set: "", rarity: "", sort: "value", tab: "binder" };
 const photoCache = new Map();
 function cardFromCatalogue(c) {
   return { cardId: c.id, name: c.name, number: c.number, setId: c.set.id, setName: c.set.name, setCode: c.set.code, printedTotal: c.set.total, series: c.set.series, released: c.set.released, rarity: c.rarity || "", supertype: c.supertype || "" };
@@ -722,7 +825,9 @@ function renderFilters(cards) {
 async function renderList() {
   const cards = Store.cards;
   renderTotals(cards); renderFilters(cards);
-  const has = cards.length > 0;
+  const has = cards.length > 0; const tab = view.tab;
+  if (tab === "decks") { $("#filters").hidden = true; $("#empty").hidden = true; $("#fab").hidden = true; $("#list").hidden = true; $("#gallery").hidden = true; $("#decks").hidden = false; return renderDecks(); }
+  $("#decks").hidden = true; $("#list").hidden = tab !== "binder"; $("#gallery").hidden = tab !== "gallery";
   $("#filters").hidden = !has; $("#empty").hidden = has; $("#fab").hidden = !has;
   const q = norm(view.q);
   let rows = cards.filter(c => (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) &&
@@ -735,6 +840,7 @@ async function renderList() {
     name: (a, b) => a.name.localeCompare(b.name)
   }[view.sort];
   rows.sort(cmp);
+  if (tab === "gallery") return renderGallery(rows);
   const list = $("#list");
   if (has && !rows.length) { list.innerHTML = `<li class="muted" style="padding:16px 4px">No cards match these filters.</li>`; return; }
   list.innerHTML = rows.map(c => {
@@ -752,9 +858,7 @@ async function renderList() {
   }).join("");
   for (const c of rows) {
     const el = list.querySelector(`[data-photo="${CSS.escape(c.id)}"]`); if (!el) continue;
-    let u = photoCache.get(c.id); if (u === undefined) { u = await Store.photoURL(c); photoCache.set(c.id, u); }
-    const cat = Cat.byId.get(c.cardId);
-    el.innerHTML = imgTag(u || cardImage(cat), c.name);
+    el.innerHTML = picTag(await cardPicture(c, false), c.name);
   }
 }
 
@@ -1039,9 +1143,11 @@ async function renderDetail() {
   const tcgp = (p && p.url) || `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(c.name + " " + c.number)}`;
 
   b.innerHTML = `
-    <div class="detail-hero">
-      <figure>${photo ? `<img src="${esc(photo)}" alt="Your photo of ${esc(c.name)}">` : `<div class="ph">No photo</div>`}<figcaption>Your photo</figcaption></figure>
-      <figure>${cat ? `<img src="${esc(cardImage(cat, true))}" alt="Catalogue image of ${esc(c.name)}" data-fail="ph">` : `<div class="ph">No catalogue image</div>`}<figcaption>Catalogue</figcaption></figure>
+    <div class="detail-hero">${(() => {
+      const mineFig = `<figure>${photo ? `<img src="${esc(photo)}" alt="Your photo of ${esc(c.name)}">` : `<div class="ph">No photo</div>`}<figcaption>Your photo</figcaption></figure>`;
+      const catFig = `<figure>${cat ? `<img src="${esc(cardImage(cat, true))}" alt="Catalogue image of ${esc(c.name)}" data-fail="ph">` : `<div class="ph">No catalogue image</div>`}<figcaption>Catalogue</figcaption></figure>`;
+      return Prefs.pics === "catalogue" ? catFig + mineFig : mineFig + catFig;
+    })()}
     </div>
     <div class="facts">
       <div class="fact"><div class="k">Set</div><div class="v">${esc(c.setName)}</div><div class="muted" style="font-size:12px">${esc(c.series || "")} · ${esc(String(c.released || "").slice(0, 4))}</div></div>
@@ -1075,21 +1181,509 @@ async function renderDetail() {
   const no = $("#dDelNo"); if (no) no.addEventListener("click", () => { confirmDelete = false; renderDetail(); });
 }
 
+/* ---------- picture preference: your photos or the catalogue's ---------- */
+const Prefs = { pics: "mine", stdMarks: "HIJ" };
+try { Prefs.pics = localStorage.getItem("pokelab-pics") === "catalogue" ? "catalogue" : "mine"; } catch (x) {}
+try { const m = localStorage.getItem("pokelab-std"); if (m && /^[A-Z]{1,6}$/.test(m)) Prefs.stdMarks = m; } catch (x) {}
+async function cardPicture(c, large) {
+  const cat = Cat.byId.get(c.cardId);
+  let photo = photoCache.get(c.id); if (photo === undefined) { photo = await Store.photoURL(c); photoCache.set(c.id, photo); }
+  const catalogue = cat ? cardImage(cat, large) : "";
+  if (Prefs.pics === "catalogue") return { src: catalogue || photo, alt: catalogue ? photo : "" };
+  return { src: photo || catalogue, alt: photo ? "" : "" };
+}
+function picTag(pic, alt) {
+  if (!pic.src) return "";
+  return `<img src="${esc(pic.src)}" alt="${esc(alt)}" loading="lazy" data-fail="remove"${pic.alt ? ` data-alt="${esc(pic.alt)}"` : ""}>`;
+}
+
+/* ---------- gallery ---------- */
+const reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+const canHover = window.matchMedia && matchMedia("(hover: hover) and (pointer: fine)").matches;
+let galObserver = null;
+async function renderGallery(rows) {
+  const g = $("#gallery");
+  if (!rows.length) { g.innerHTML = Store.cards.length ? `<li class="muted" style="grid-column:1/-1;padding:16px 4px">No cards match these filters.</li>` : ""; return; }
+  g.innerHTML = rows.map((c, i) => {
+    const p = pickPrice(c); const g8 = c.condition && c.condition.grade; const q = c.qty || 1;
+    const label = `${c.name}, ${c.setName} ${c.number}${p ? ", " + usd(p.value) : ""}${c.rarity ? ", " + c.rarity : ""}`;
+    return `<li class="gcard t-${tier(c.rarity)}" style="--i:${i % 8}">
+      <button class="gbtn" type="button" data-open="${esc(c.id)}" aria-label="${esc(label)}">
+        <span class="gimg" data-gimg="${esc(c.id)}"><span class="ph">${esc(c.name)}</span></span>
+        <span class="gsheen" aria-hidden="true"></span>
+        ${q > 1 ? `<span class="gbadge qty" aria-hidden="true">×${q}</span>` : ""}
+        ${g8 ? `<span class="gbadge grade" aria-hidden="true">Est. ${esc(g8)}</span>` : ""}
+        <span class="gov" aria-hidden="true">
+          <span class="gname">${esc(c.name)}</span>
+          <span class="gset">${esc(c.setCode || c.setId)} ${esc(c.number)}/${esc(c.printedTotal || "?")} · ${esc(c.setName)}</span>
+          <span class="grow"><span class="gval${p ? "" : " none"}">${p ? usd(p.value) : "No price"}</span>${c.rarity ? `<span class="grar">${esc(c.rarity)}</span>` : ""}</span>
+        </span>
+      </button></li>`;
+  }).join("");
+  if (galObserver) galObserver.disconnect();
+  const items = [...g.querySelectorAll(".gcard")];
+  if (reduceMotion || !("IntersectionObserver" in window)) items.forEach(el => el.classList.add("in"));
+  else {
+    galObserver = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { e.target.classList.add("in"); galObserver.unobserve(e.target); } }, { rootMargin: "0px 0px -6% 0px" });
+    items.forEach(el => galObserver.observe(el));
+  }
+  for (const c of rows) {
+    const el = g.querySelector(`[data-gimg="${CSS.escape(c.id)}"]`); if (!el) continue;
+    const pic = await cardPicture(c, true);
+    if (pic.src) el.innerHTML = picTag(pic, "") + "";
+  }
+}
+function wireGalleryTilt() {
+  const g = $("#gallery");
+  if (reduceMotion || !canHover) return;
+  g.addEventListener("pointermove", e => {
+    const b = e.target.closest(".gbtn"); if (!b) return;
+    const r = b.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    b.classList.add("tilting");
+    b.style.setProperty("--ry", ((x - .5) * 14).toFixed(2) + "deg"); b.style.setProperty("--rx", ((.5 - y) * 14).toFixed(2) + "deg");
+    b.style.setProperty("--mx", (x * 100).toFixed(1) + "%"); b.style.setProperty("--my", (y * 100).toFixed(1) + "%");
+  });
+  g.addEventListener("pointerout", e => {
+    const b = e.target.closest(".gbtn"); if (!b || b.contains(e.relatedTarget)) return;
+    b.classList.remove("tilting"); b.style.removeProperty("--rx"); b.style.removeProperty("--ry");
+  });
+}
+
+/* ---------- deck data (gameplay facts for playable cards) ---------- */
+const TYPE_NAMES = { G: "Grass", R: "Fire", W: "Water", L: "Lightning", P: "Psychic", F: "Fighting", D: "Darkness", M: "Metal", Y: "Fairy", N: "Dragon", C: "Colorless" };
+const ROLE_INFO = {
+  D: ["Draw", "Draws you new cards"], S: ["Pokémon search", "Finds Pokémon from your deck"], W: ["Switching", "Gets your Active Pokémon out"],
+  G: ["Gust", "Pulls up your opponent's Benched Pokémon"], R: ["Recovery", "Gets cards back from your discard pile"], E: ["Energy", "Finds or attaches Energy"], C: ["Evolution", "Lets Basics evolve straight to Stage 2"], U: ["Supporter search", "Finds the Supporter you need"]
+};
+const STAPLES = new Set(["Ultra Ball", "Nest Ball", "Buddy-Buddy Poffin", "Rare Candy", "Switch", "Night Stretcher", "Super Rod", "Boss's Orders", "Lillie's Determination", "Pokégear 3.0", "Energy Retrieval", "Poké Pad", "Hilda", "Dawn", "Crispin", "Brock's Scouting", "Carmine", "Professor's Research", "Iono", "Arven", "Counter Catcher", "Prime Catcher", "Earthen Vessel"]);
+const DK = { ready: false, loading: null, byId: new Map(), byKey: new Map(), keys: [] };
+function loadDeckData() {
+  if (DK.loading) return DK.loading;
+  DK.loading = (async () => {
+    const r = await fetch("deck.json"); if (!r.ok) throw new Error("deck data " + r.status);
+    const d = await r.json();
+    for (const x of d.rows) {
+      const cat = Cat.byId.get(x[0]); if (!cat) continue;
+      const row = { id: x[0], kind: x[1], subs: x[2] ? x[2].split("|") : [], hp: x[3], types: x[4], evo: x[5], atk: x[6], abil: x[7], mark: x[8], exp: x[9], roles: x[10], cat, name: cat.name };
+      row.basicEnergy = row.kind === "E" && row.subs.includes("Basic");
+      row.key = row.basicEnergy ? "E:" + row.name.replace(/^Basic\s+/i, "").toLowerCase()
+        : row.kind === "P" ? "P:" + row.name + "|" + row.atk.map(a => a[0]).join(",") + "|" + row.abil.join(",")
+        : row.kind + ":" + row.name;
+      row.maxDmg = Math.max(0, ...row.atk.map(a => parseInt(a[2]) || 0));
+      row.bestRate = Math.max(0, ...row.atk.map(a => (parseInt(a[2]) || 0) / Math.max(1, a[1].length)));
+      DK.byId.set(row.id, row);
+      if (!DK.byKey.has(row.key)) DK.byKey.set(row.key, []);
+      DK.byKey.get(row.key).push(row);
+    }
+    DK.keys = [...DK.byKey.keys()];
+    DK.ready = true;
+  })().catch(e => { DK.loading = null; throw e; });
+  return DK.loading;
+}
+const stdMarks = () => Prefs.stdMarks.split("");
+function keyLegal(key, fmt) {
+  const prints = DK.byKey.get(key); if (!prints) return false;
+  if (prints[0].basicEnergy) return true;
+  if (fmt === "expanded") return prints.some(r => r.exp === 1);
+  const ok = stdMarks(); return prints.some(r => r.mark && ok.includes(r.mark));
+}
+function ownedByKey() {
+  const m = new Map();
+  for (const c of Store.cards) { const r = DK.byId.get(c.cardId); if (r) m.set(r.key, (m.get(r.key) || 0) + (c.qty || 1)); }
+  return m;
+}
+/* the print to show and price for a playable card: one you own, else the most common-looking recent print */
+function repPrint(key) {
+  const prints = DK.byKey.get(key) || [];
+  const own = new Set(Store.cards.map(c => c.cardId));
+  const mine = prints.find(r => own.has(r.id)); if (mine) return mine;
+  const rank = r => ({ common: 0, rare: 1, ultra: 2, secret: 3 })[tier(r.cat.rarity)] * 10 - Number(String(r.cat.set.released).slice(0, 4)) / 1000 + (/promo/i.test(r.cat.set.name) ? 5 : 0);
+  return [...prints].sort((a, b) => rank(a) - rank(b))[0];
+}
+function packsFor(key) {
+  const seen = new Map();
+  for (const r of [...(DK.byKey.get(key) || [])].sort((a, b) => String(b.cat.set.released).localeCompare(String(a.cat.set.released)))) if (!seen.has(r.cat.set.id)) seen.set(r.cat.set.id, r.cat.set);
+  return [...seen.values()];
+}
+function packLine(key) {
+  const sets = packsFor(key).slice(0, 3); if (!sets.length) return "";
+  const promo = s => /promo|black star/i.test(s.name);
+  const parts = sets.map(s => `${esc(s.name)}${s.code ? " (" + esc(s.code) + ")" : ""}${promo(s) ? " promo" : ""}`);
+  const first = sets.find(s => !promo(s));
+  const link = first ? ` · <a href="https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(first.name + " booster pack")}" target="_blank" rel="noopener">pack prices</a>` : "";
+  return `From ${parts.join(", ")}${link}`;
+}
+
+/* prices for cards that aren't in the binder, cached in this browser for 6 hours */
+const PriceCache = { m: new Map(), loaded: false };
+function pcLoad() { if (PriceCache.loaded) return; PriceCache.loaded = true; try { const o = JSON.parse(localStorage.getItem("pokelab-pricecache") || "{}"); for (const k in o) PriceCache.m.set(k, o[k]); } catch (x) {} }
+function pcSave() { try { const arr = [...PriceCache.m].slice(-500); localStorage.setItem("pokelab-pricecache", JSON.stringify(Object.fromEntries(arr))); } catch (x) {} }
+function priceOf(cardId, finish) {
+  const own = Store.cards.find(c => c.cardId === cardId && c.price);
+  const p = own ? own.price : PriceCache.m.get(cardId);
+  if (!p) return null; const v = pickPrice({ price: p, finish: finish || "" }); return v ? v.value : null;
+}
+function priceLabel(id) {
+  const p = priceOf(id); if (p != null) return usd(p);
+  if (PriceState.blocked) return inClaude ? "prices load on the hosted copy" : "price services didn't answer";
+  return PriceCache.m.has(id) || Store.cards.some(c => c.cardId === id && c.price) ? "no price listed" : "checking price…";
+}
+let pricing = false;
+async function ensurePrices(ids) {
+  pcLoad(); if (pricing || PriceState.blocked) return false;
+  const need = [...new Set(ids)].filter(id => { if (Store.cards.some(c => c.cardId === id && c.price)) return false; const p = PriceCache.m.get(id); return !p || Date.now() - p.fetchedAt > STALE; }).slice(0, 40);
+  if (!need.length) return false;
+  pricing = true;
+  try {
+    const cards = need.map(id => { const r = DK.byId.get(id) || { cat: Cat.byId.get(id) }; return r.cat ? cardFromCatalogue(r.cat) : null; }).filter(Boolean);
+    const { prices, reached } = await fetchPrices(cards);
+    if (!reached) { PriceState.blocked = true; return true; }
+    for (const id of need) PriceCache.m.set(id, prices.get(id) || { usd: {}, eur: null, fetchedAt: Date.now(), v: 2 });
+    pcSave(); return true;
+  } finally { pricing = false; }
+}
+
+/* ---------- deck rules and suggestions ---------- */
+function deckLines(deck) {
+  return deck.cards.map(x => ({ id: x.id, n: x.n, row: DK.byId.get(x.id) })).filter(l => l.row);
+}
+function analyzeDeck(deck) {
+  const lines = deckLines(deck);
+  const count = k => lines.filter(l => l.row.kind === k).reduce((a, l) => a + l.n, 0);
+  const total = lines.reduce((a, l) => a + l.n, 0);
+  const probs = [];
+  if (total !== 60) probs.push(total < 60 ? `Add ${60 - total} more card${60 - total === 1 ? "" : "s"} (a deck is exactly 60).` : `Take out ${total - 60} card${total - 60 === 1 ? "" : "s"} (a deck is exactly 60).`);
+  const byName = new Map();
+  for (const l of lines) if (!l.row.basicEnergy) byName.set(l.row.name, (byName.get(l.row.name) || 0) + l.n);
+  for (const [n, q] of byName) if (q > 4) probs.push(`${n}: ${q} copies, the limit is 4.`);
+  if (!lines.some(l => l.row.kind === "P" && l.row.subs.includes("Basic"))) probs.push("Add at least one Basic Pokémon.");
+  const ace = lines.filter(l => l.row.subs.includes("ACE SPEC")).reduce((a, l) => a + l.n, 0);
+  if (ace > 1) probs.push(`${ace} ACE SPEC cards, the limit is 1.`);
+  const rad = lines.filter(l => l.row.subs.includes("Radiant")).reduce((a, l) => a + l.n, 0);
+  if (rad > 1) probs.push(`${rad} Radiant Pokémon, the limit is 1.`);
+  const illegal = [...new Set(lines.filter(l => !keyLegal(l.row.key, deck.format)).map(l => l.row.name))];
+  if (illegal.length) probs.push(`Not legal in ${deck.format === "expanded" ? "Expanded" : "Standard"}: ${illegal.join(", ")}.`);
+  return { lines, total, pokemon: count("P"), trainers: count("T"), energy: count("E"), probs };
+}
+function mainTypes(lines) {
+  const t = new Map();
+  for (const l of lines) if (l.row.kind === "P") for (const a of l.row.atk) for (const ch of a[1]) if (ch !== "C") t.set(ch, (t.get(ch) || 0) + l.n);
+  if (!t.size) for (const l of lines) if (l.row.kind === "P") for (const ch of l.row.types) t.set(ch, (t.get(ch) || 0) + l.n);
+  return [...t].sort((a, b) => b[1] - a[1]).map(x => x[0]);
+}
+function basicEnergyKey(typeLetter) { const k = "E:" + (TYPE_NAMES[typeLetter] || "").toLowerCase() + " energy"; return DK.byKey.has(k) ? k : null; }
+function roleCandidates(role, fmt, exclude, owned) {
+  const out = [];
+  for (const [key, prints] of DK.byKey) {
+    const r = prints[0]; if (r.kind !== "T" || exclude.has(key)) continue;
+    if (!prints.some(p => p.roles.includes(role) || (role === "D" && p.roles.includes("U")))) continue;
+    if (!keyLegal(key, fmt)) continue;
+    if (r.subs.includes("ACE SPEC")) continue;
+    const latest = Math.max(...prints.map(p => Number(String(p.cat.set.released).slice(0, 4))));
+    let s = latest / 1000 + (STAPLES.has(r.name) ? 50 : 0) + ((owned.get(key) || 0) > 0 ? 100 : 0);
+    if (role === "D" && r.subs.includes("Supporter")) s += 5;
+    out.push([s, key]);
+  }
+  return out.sort((a, b) => b[0] - a[0]).map(x => x[1]);
+}
+const ROLE_TARGETS = [["D", 8], ["S", 6], ["W", 2], ["G", 2], ["R", 2]];
+function roleCount(lines, role) { return lines.filter(l => l.row.kind === "T" && (l.row.roles.includes(role) || (role === "D" && l.row.roles.includes("U")))).reduce((a, l) => a + l.n, 0); }
+function suggestFor(deck) {
+  const an = analyzeDeck(deck); const lines = an.lines; const fmt = deck.format;
+  const owned = ownedByKey(); const inDeck = new Set(lines.map(l => l.row.key));
+  const names = new Set(lines.map(l => l.row.name));
+  const room = Math.max(0, 60 - an.total);
+  const out = [];
+  const push = (group, key, why, qty) => { if (!key || inDeck.has(key) || out.some(o => o.key === key)) return; const cap = DK.byKey.get(key)[0].basicEnergy ? 20 : 4; out.push({ group, key, why, qty: Math.max(1, Math.min(cap, qty || 1)) }); };
+  // evolution lines
+  for (const l of lines) {
+    let r = l.row; if (r.kind !== "P") continue;
+    while (r && r.evo && !names.has(r.evo)) {
+      const cands = DK.keys.filter(k => k.startsWith("P:" + r.evo + "|") && keyLegal(k, fmt));
+      if (!cands.length) break;
+      cands.sort((a, b) => (owned.get(b) || 0) - (owned.get(a) || 0) || (DK.byKey.get(b)[0].hp - DK.byKey.get(a)[0].hp));
+      const pre = DK.byKey.get(cands[0])[0];
+      push("Finish your evolution lines", cands[0], `${r.name} evolves from ${r.evo}, and the deck has none.`, pre.evo ? Math.max(2, l.n - 1) : 4);
+      r = pre;
+    }
+  }
+  const stage2 = lines.filter(l => l.row.kind === "P" && l.row.subs.includes("Stage 2")).reduce((a, l) => a + l.n, 0);
+  if (stage2) {
+    const candy = lines.filter(l => l.row.roles.includes("C")).reduce((a, l) => a + l.n, 0);
+    if (candy < 3) { const k = roleCandidates("C", fmt, inDeck, owned)[0]; push("Finish your evolution lines", k, "Lets a Basic evolve straight into your Stage 2 Pokémon.", 4 - candy); }
+  }
+  // energy
+  const types = mainTypes(lines);
+  const basicE = lines.filter(l => l.row.basicEnergy).reduce((a, l) => a + l.n, 0);
+  const target = stage2 ? 9 : 11;
+  if (types.length && an.pokemon && basicE < Math.min(8, target)) {
+    const k = basicEnergyKey(types[0]);
+    if (k && !inDeck.has(k)) push("Energy", k, `Your attackers mostly need ${TYPE_NAMES[types[0]]} Energy. About ${target} basic Energy is a usual start.`, target - basicE);
+  }
+  // consistency
+  for (const [role, want] of ROLE_TARGETS) {
+    const have = roleCount(lines, role); if (have >= want) continue;
+    const cands = roleCandidates(role, fmt, inDeck, owned).slice(0, 2);
+    for (const k of cands) push("Make the deck more consistent", k, `${ROLE_INFO[role][1]}. You have ${have}, most decks run about ${want}.`, Math.min(4, want - have));
+  }
+  // your cards that fit
+  if (types.length) {
+    const mine = [...owned.keys()].filter(k => k.startsWith("P:") && !inDeck.has(k) && keyLegal(k, fmt)).map(k => DK.byKey.get(k)[0])
+      .filter(r => types.slice(0, 2).some(t => r.types.includes(t))).sort((a, b) => b.maxDmg - a.maxDmg).slice(0, 4);
+    for (const r of mine) push("Cards you already own that fit", r.key, `${TYPE_NAMES[r.types[0]] || ""} type, attacks for up to ${r.maxDmg}.`, 1);
+    const hitters = DK.keys.filter(k => k.startsWith("P:") && !inDeck.has(k)).map(k => DK.byKey.get(k)[0])
+      .filter(r => r.types.includes(types[0]) && r.maxDmg >= 120 && !names.has(r.name) && keyLegal(r.key, fmt)).sort((a, b) => b.bestRate - a.bestRate || b.maxDmg - a.maxDmg).slice(0, 4);
+    for (const r of hitters) push(`Strong ${TYPE_NAMES[types[0]]} attackers`, r.key, `${r.atk.map(a => `${a[0]} ${a[2] || ""}`.trim()).join(", ")}. Picked by damage for the Energy it needs, not tournament results.`, 2);
+  }
+  return { an, out, room };
+}
+/* starter list built around one Pokémon */
+function buildAround(key, fmt) {
+  const owned = ownedByKey(); const cards = new Map(); const add = (k, n) => { const r = repPrint(k); if (r) cards.set(r.id, (cards.get(r.id) || 0) + n); };
+  const top = DK.byKey.get(key)[0];
+  const line = [top]; let cur = top;
+  while (cur.evo) {
+    const cands = DK.keys.filter(k => k.startsWith("P:" + cur.evo + "|") && keyLegal(k, fmt));
+    if (!cands.length) break;
+    cands.sort((a, b) => (owned.get(b) || 0) - (owned.get(a) || 0) || DK.byKey.get(b)[0].hp - DK.byKey.get(a)[0].hp);
+    cur = DK.byKey.get(cands[0])[0]; line.unshift(cur);
+  }
+  const counts = line.length === 3 ? [4, 2, 3] : line.length === 2 ? [4, 3] : [4];
+  line.forEach((r, i) => add(r.key, counts[i]));
+  let used = counts.reduce((a, b) => a + b, 0);
+  const inDeck = new Set(line.map(r => r.key));
+  // a lone Basic attacker gets two Basic partners that use the same Energy
+  if (line.length === 1) {
+    const need = new Set(top.atk.flatMap(a => a[1].split("")).filter(ch => ch !== "C"));
+    const partners = DK.keys.filter(k => k.startsWith("P:") && !inDeck.has(k) && keyLegal(k, fmt)).map(k => DK.byKey.get(k)[0])
+      .filter(r => r.subs.includes("Basic") && r.name !== top.name && r.maxDmg >= 100 && r.atk.every(a => a[1].split("").every(ch => ch === "C" || need.has(ch))) && (need.size === 0 || r.atk.some(a => a[1].split("").some(ch => need.has(ch)))))
+      .sort((a, b) => ((owned.get(b.key) || 0) > 0) - ((owned.get(a.key) || 0) > 0) || b.bestRate - a.bestRate).slice(0, 2);
+    for (const r of partners) { add(r.key, 3); inDeck.add(r.key); used += 3; }
+  }
+  const takeRole = (role, want) => {
+    for (const k of roleCandidates(role, fmt, inDeck, owned)) {
+      if (want <= 0 || used >= 60) break;
+      const n = Math.min(DK.byKey.get(k)[0].subs.includes("Supporter") || role === "S" || role === "C" ? 4 : 2, want, 60 - used);
+      add(k, n); inDeck.add(k); used += n; want -= n;
+    }
+  };
+  if (line.length === 3) takeRole("C", 4);
+  // Energy split by what the main attacker's attacks cost
+  const need = new Map();
+  for (const a of top.atk) for (const ch of a[1]) if (ch !== "C" && basicEnergyKey(ch)) need.set(ch, (need.get(ch) || 0) + 1);
+  if (!need.size && top.types[0] && basicEnergyKey(top.types[0])) need.set(top.types[0], 1);
+  const energy = need.size ? (line.length === 3 ? 9 : 11) : 0;
+  const trainerRoom = 60 - used - energy;
+  const plan = [["D", Math.round(trainerRoom * .38)], ["S", Math.round(trainerRoom * .28)], ["W", 2], ["G", 2], ["R", 2]];
+  for (const [r, n] of plan) takeRole(r, Math.min(n, 60 - used - energy));
+  if (60 - used - energy > 0) takeRole("D", 60 - used - energy);
+  if (60 - used - energy > 0) takeRole("S", 60 - used - energy);
+  if (need.size) {
+    const tot = [...need.values()].reduce((a, b) => a + b, 0); const ents = [...need].sort((a, b) => b[1] - a[1]);
+    let left = 60 - used;
+    ents.forEach(([ch, w], i) => { const n = i === ents.length - 1 ? left : Math.round((60 - used) * w / tot); if (n > 0) { add(basicEnergyKey(ch), n); left -= n; } });
+    used = 60;
+  }
+  return [...cards].map(([id, n]) => ({ id, n }));
+}
+function deckText(deck) {
+  const an = analyzeDeck(deck); const out = [];
+  for (const [k, label] of [["P", "Pokémon"], ["T", "Trainer"], ["E", "Energy"]]) {
+    const ls = an.lines.filter(l => l.row.kind === k); if (!ls.length) continue;
+    out.push(`${label}: ${ls.reduce((a, l) => a + l.n, 0)}`);
+    for (const l of ls) out.push(`${l.n} ${l.row.name} ${l.row.cat.set.code || l.row.cat.set.id.toUpperCase()} ${l.row.cat.number}`);
+    out.push("");
+  }
+  out.push(`Total Cards: ${an.total}`);
+  return out.join("\n");
+}
+
+/* ---------- deck screens ---------- */
+const dv = { open: null, q: "", ownedOnly: false, around: false, aroundQ: "", fmt: "standard", copied: false };
+function fmtName(f) { return f === "expanded" ? "Expanded" : "Standard"; }
+function searchPlayable(q, fmt, opts = {}) {
+  const raw = norm(q); if (!raw && !opts.ownedOnly) return [];
+  const owned = ownedByKey(); const out = [];
+  for (const [key, prints] of DK.byKey) {
+    const r = prints[0];
+    if (opts.kind && r.kind !== opts.kind) continue;
+    if (opts.ownedOnly && !owned.get(key)) continue;
+    const n = norm(r.name);
+    let s = 0;
+    if (raw) { if (n === raw) s = 6; else if (n.startsWith(raw)) s = 4; else if (n.includes(raw)) s = 3; else continue; }
+    if (!keyLegal(key, fmt)) continue;
+    s += (owned.get(key) ? 2 : 0) + Number(String(prints[prints.length - 1].cat.set.released).slice(0, 4)) / 10000;
+    out.push([s, key]);
+  }
+  return out.sort((a, b) => b[0] - a[0]).slice(0, 24).map(x => x[1]);
+}
+function thumbFor(r) { const src = cardImage(r.cat); return src ? `<img src="${esc(src)}" alt="" loading="lazy" data-fail="remove">` : ""; }
+async function renderDecks() {
+  const host = $("#decks");
+  if (!DK.ready) {
+    host.innerHTML = `<p class="muted"><span class="spinner"></span>Loading card rules…</p>`;
+    try { await loadDeckData(); } catch (e) { host.innerHTML = `<p class="err">The deck builder's card data didn't load. Reopen the page to try again.</p>`; return; }
+  }
+  const deck = dv.open && Store.decks.find(d => d.id === dv.open);
+  if (!deck) { dv.open = null; return renderDeckList(host); }
+  return renderDeckEditor(host, deck);
+}
+function renderDeckList(host) {
+  const decks = [...Store.decks].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const owned = ownedByKey();
+  let aroundHtml = "";
+  if (dv.around) {
+    const res = dv.aroundQ ? searchPlayable(dv.aroundQ, dv.fmt, { kind: "P" }) : searchPlayable("", dv.fmt, { kind: "P", ownedOnly: true });
+    aroundHtml = `<div class="card-box">
+      <div class="grid2">
+        <div class="field"><label for="arQ">Pokémon to build around</label><input id="arQ" type="search" value="${esc(dv.aroundQ)}" placeholder="e.g. Pikachu ex" autocomplete="off"></div>
+        <div class="field"><label for="arF">Format</label><select id="arF"><option value="standard" ${dv.fmt === "standard" ? "selected" : ""}>Standard</option><option value="expanded" ${dv.fmt === "expanded" ? "selected" : ""}>Expanded</option></select></div>
+      </div>
+      ${!dv.aroundQ ? `<p class="muted" style="margin:0">${res.length ? "Pokémon you own that are legal in " + fmtName(dv.fmt) + ":" : "Search for a Pokémon to build around."}</p>` : ""}
+      <ul class="cands">${res.map(k => { const r = repPrint(k); return `<li><button class="cand" type="button" data-around="${esc(k)}"><span class="thumb">${thumbFor(r)}</span><span class="t"><b>${esc(r.name)}</b><span>${esc(r.subs.filter(s => /Basic|Stage|ex|Mega|V/.test(s)).join(" · "))} · ${r.hp} HP · ${esc(r.atk.map(a => a[0] + (a[2] ? " " + a[2] : "")).join(", "))}${owned.get(k) ? " · you have " + owned.get(k) : ""}</span></span><span></span></button></li>`; }).join("")}</ul>
+      <div><button class="btn small ghost" type="button" id="arCancel">Cancel</button></div>
+    </div>`;
+  }
+  host.innerHTML = `
+    <div class="dk-head"><h2>Decks</h2>
+      <div class="actions"><button class="btn small primary" type="button" id="dkAround">Build around a Pokémon</button><button class="btn small" type="button" id="dkNew">Empty deck</button></div></div>
+    ${aroundHtml}
+    ${decks.length ? `<ul class="dk-list">${decks.map(d => { const an = analyzeDeck(d); return `<li><button class="dk-item" type="button" data-deck="${esc(d.id)}"><span><b>${esc(d.name)}</b><span>${fmtName(d.format)} · ${an.total}/60 cards · ${an.probs.length ? an.probs.length + " to fix" : "ready to play"}</span></span><span class="${an.probs.length ? "warnc" : "ok"}">${an.probs.length ? "Not ready" : "Legal"}</span></button></li>`; }).join("")}</ul>`
+      : !dv.around ? `<div class="empty" style="margin:8px 0"><h2>No decks yet</h2><p>Pick a Pokémon and Poke Lab builds a 60-card starting list around it, using cards you own where it can. Then it suggests what to add, which packs they come in and what they cost.</p></div>` : ""}
+    <p class="src" style="margin:0">Standard here means regulation marks ${esc(stdMarks().join(", "))} (from the April 2026 rotation). <button class="linkbtn" type="button" id="dkMarks">Change</button></p>`;
+  $("#dkNew").addEventListener("click", async () => { const d = newDeck("New deck", "standard", []); await Store.putDeck(d); dv.open = d.id; renderDecks(); });
+  $("#dkAround").addEventListener("click", () => { dv.around = true; renderDecks(); setTimeout(() => { const i = $("#arQ"); i && i.focus(); }, 0); });
+  const arQ = $("#arQ"); if (arQ) arQ.addEventListener("input", e => { dv.aroundQ = e.target.value; const pos = e.target.selectionStart; renderDecks().then(() => { const i = $("#arQ"); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }); });
+  const arF = $("#arF"); if (arF) arF.addEventListener("change", e => { dv.fmt = e.target.value; renderDecks(); });
+  const arC = $("#arCancel"); if (arC) arC.addEventListener("click", () => { dv.around = false; dv.aroundQ = ""; renderDecks(); });
+  host.querySelectorAll("[data-around]").forEach(b => b.addEventListener("click", async () => {
+    const key = b.dataset.around; const r = DK.byKey.get(key)[0];
+    const d = newDeck(`${r.name} deck`, dv.fmt, buildAround(key, dv.fmt));
+    await Store.putDeck(d); dv.around = false; dv.aroundQ = ""; dv.open = d.id; renderDecks(); toast(`Built a starting list around ${r.name}`);
+  }));
+  host.querySelectorAll("[data-deck]").forEach(b => b.addEventListener("click", () => { dv.open = b.dataset.deck; dv.q = ""; renderDecks(); window.scrollTo({ top: 0 }); }));
+  $("#dkMarks").addEventListener("click", () => {
+    const p = $("#dkMarks").parentElement;
+    p.innerHTML = `<span class="field" style="max-width:260px"><label for="mkIn">Legal regulation marks (letters)</label><input id="mkIn" type="text" value="${esc(Prefs.stdMarks)}" maxlength="6" autocomplete="off"></span>`;
+    const i = $("#mkIn"); i.focus();
+    i.addEventListener("change", () => { const m = i.value.toUpperCase().replace(/[^A-Z]/g, ""); if (m) { Prefs.stdMarks = m; try { localStorage.setItem("pokelab-std", m); } catch (x) {} } renderDecks(); });
+  });
+}
+function newDeck(name, format, cards) { return { id: "deck_" + uid(), name, format, cards, createdAt: Date.now(), updatedAt: Date.now() }; }
+async function saveDeck(deck) { deck.updatedAt = Date.now(); await Store.putDeck(deck); }
+function setQty(deck, id, n) {
+  const i = deck.cards.findIndex(x => x.id === id);
+  if (n <= 0) { if (i >= 0) deck.cards.splice(i, 1); }
+  else if (i >= 0) deck.cards[i].n = n; else deck.cards.push({ id, n });
+}
+let deckRender = 0;
+async function renderDeckEditor(host, deck) {
+  const ticket = ++deckRender;
+  const { an, out } = suggestFor(deck); const owned = ownedByKey();
+  const lineIds = an.lines.map(l => l.id); const sugIds = out.map(o => repPrint(o.key).id);
+  const cost = (ids) => ids.reduce((a, [id, n]) => { const p = priceOf(id); return p == null ? a : a + p * n; }, 0);
+  const missingFor = l => Math.max(0, l.n - (owned.get(l.row.key) || 0));
+  const deckValue = cost(an.lines.map(l => [l.id, l.n]));
+  const toBuy = cost(an.lines.map(l => [l.id, missingFor(l)]));
+  const unpriced = an.lines.filter(l => priceOf(l.id) == null).length;
+  const results = dv.q || dv.ownedOnly ? searchPlayable(dv.q, deck.format, { ownedOnly: dv.ownedOnly }) : [];
+  const lineHtml = l => {
+    const p = priceOf(l.id); const have = owned.get(l.row.key) || 0;
+    return `<div class="dk-line"><span class="thumb">${thumbFor(l.row)}</span>
+      <span class="t"><b>${esc(l.row.name)}</b><span>${esc(l.row.cat.set.code || l.row.cat.set.id)} ${esc(l.row.cat.number)} · ${p != null ? usd(p) + " each" : esc(priceLabel(l.id))} · ${have >= l.n ? `<span class="ok">you have ${have}</span>` : have ? `you have ${have}, need ${l.n - have} more` : "you don't have it"}</span></span>
+      <span class="stepper"><button type="button" data-dec="${esc(l.id)}" aria-label="One fewer ${esc(l.row.name)}">−</button><output>${l.n}</output><button type="button" data-inc="${esc(l.id)}" aria-label="One more ${esc(l.row.name)}">+</button></span></div>`;
+  };
+  const groups = [["P", "Pokémon", an.pokemon], ["T", "Trainers", an.trainers], ["E", "Energy", an.energy]].map(([k, label, n]) => {
+    const ls = an.lines.filter(l => l.row.kind === k); if (!ls.length) return "";
+    return `<div class="dk-group"><h3>${label} · ${n}</h3>${ls.map(lineHtml).join("")}</div>`;
+  }).join("");
+  const sgroups = [...new Set(out.map(o => o.group))].map(g => `<p class="sug-h">${esc(g)}</p>` + out.filter(o => o.group === g).map(o => {
+    const r = repPrint(o.key); const p = priceOf(r.id); const have = owned.get(o.key) || 0;
+    return `<div class="sug"><span class="thumb">${thumbFor(r)}</span><span class="t"><b>${esc(r.name)}</b><span class="why">${esc(o.why)}</span>
+      <span class="meta">${packLine(o.key)}</span>
+      <span class="meta">Card ${p != null ? usd(p) : esc(priceLabel(r.id))} (${esc(r.cat.set.code || r.cat.set.id)} ${esc(r.cat.number)})${have ? ` · <span class="ok">you have ${have}</span>` : ""}</span></span>
+      <button class="btn small" type="button" data-sugadd="${esc(r.id)}" data-n="${o.qty}">Add ${o.qty}</button></div>`;
+  }).join("")).join("");
+  host.innerHTML = `
+    <div class="dk-head"><button class="btn small ghost" type="button" id="dkBack">← All decks</button>
+      <div class="actions"><button class="btn small" type="button" id="dkCopy">${dv.copied ? "Copied" : "Copy deck list"}</button></div></div>
+    <div class="grid2">
+      <div class="field"><label for="dkName">Deck name</label><input id="dkName" type="text" value="${esc(deck.name)}" maxlength="60"></div>
+      <div class="field"><label for="dkFmt">Format</label><select id="dkFmt"><option value="standard" ${deck.format !== "expanded" ? "selected" : ""}>Standard</option><option value="expanded" ${deck.format === "expanded" ? "selected" : ""}>Expanded</option></select></div>
+    </div>
+    <div class="meter">
+      <div class="fact"><div class="k">Cards</div><div class="v ${an.total === 60 ? "ok" : "warnc"}">${an.total}/60</div></div>
+      <div class="fact"><div class="k">Card mix</div><div class="v">${an.pokemon}·${an.trainers}·${an.energy}</div><div class="muted" style="font-size:12px">Pokémon · Trainer · Energy</div></div>
+      <div class="fact"><div class="k">Deck value</div><div class="v">${usd(deckValue)}</div>${unpriced ? `<div class="muted" style="font-size:12px">${unpriced} unpriced</div>` : ""}</div>
+      <div class="fact"><div class="k">To buy</div><div class="v">${usd(toBuy)}</div><div class="muted" style="font-size:12px">cards you don't own</div></div>
+    </div>
+    ${an.probs.length ? `<div class="card-box"><b class="warnc">To make this deck legal</b><ul class="probs">${an.probs.map(p => `<li>${esc(p)}</li>`).join("")}</ul></div>` : `<div class="card-box"><b class="ok">This deck is legal in ${fmtName(deck.format)}.</b></div>`}
+    <div class="card-box">
+      <div class="field"><label for="dkQ">Add a card</label><input id="dkQ" type="search" value="${esc(dv.q)}" placeholder="Card name" autocomplete="off"></div>
+      <label class="inline-check"><input type="checkbox" id="dkOwned" ${dv.ownedOnly ? "checked" : ""}> Only cards I own</label>
+      ${results.length ? `<ul class="cands">${results.map(k => { const r = repPrint(k); const inD = an.lines.find(l => l.row.key === k); return `<li><button class="cand" type="button" data-addkey="${esc(k)}"><span class="thumb">${thumbFor(r)}</span><span class="t"><b>${esc(r.name)}</b><span>${esc(r.kind === "P" ? r.hp + " HP · " + r.atk.map(a => a[0] + (a[2] ? " " + a[2] : "")).join(", ") : r.subs.join(" · ") + (r.roles ? " · " + r.roles.split("").map(x => (ROLE_INFO[x] || [x])[0]).join(", ") : ""))}${owned.get(k) ? " · you have " + owned.get(k) : ""}${inD ? " · " + inD.n + " in deck" : ""}</span></span><span class="muted">+1</span></button></li>`; }).join("")}</ul>` : dv.q ? `<p class="muted" style="margin:0">No ${fmtName(deck.format)}-legal card matches that name.</p>` : ""}
+    </div>
+    ${groups ? `<div class="card-box">${groups}</div>` : ""}
+    ${out.length ? `<div class="card-box"><b>Suggestions</b>${sgroups}<p class="src" style="margin:0">Pack prices have no free data source, so each card links to current pack listings instead. Suggestions follow the deck's rules and roles, not tournament results.</p></div>` : ""}
+    <div><button class="btn danger small" type="button" id="dkDel">${dv.confirmDel ? "Tap again to delete this deck" : "Delete deck"}</button></div>`;
+  const rerender = () => renderDecks();
+  $("#dkBack").addEventListener("click", () => { dv.open = null; dv.q = ""; dv.confirmDel = false; dv.copied = false; rerender(); });
+  $("#dkName").addEventListener("change", e => { deck.name = e.target.value.trim() || "Untitled deck"; saveDeck(deck); });
+  $("#dkFmt").addEventListener("change", e => { deck.format = e.target.value; saveDeck(deck).then(rerender); });
+  $("#dkQ").addEventListener("input", e => { dv.q = e.target.value; const pos = e.target.selectionStart; renderDecks().then(() => { const i = $("#dkQ"); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }); });
+  $("#dkOwned").addEventListener("change", e => { dv.ownedOnly = e.target.checked; rerender(); });
+  host.querySelectorAll("[data-addkey]").forEach(b => b.addEventListener("click", () => { const r = repPrint(b.dataset.addkey); const cur = (deck.cards.find(x => x.id === r.id) || { n: 0 }).n; setQty(deck, r.id, cur + 1); saveDeck(deck).then(rerender); }));
+  host.querySelectorAll("[data-inc]").forEach(b => b.addEventListener("click", () => { const x = deck.cards.find(c => c.id === b.dataset.inc); setQty(deck, b.dataset.inc, (x ? x.n : 0) + 1); saveDeck(deck).then(rerender); }));
+  host.querySelectorAll("[data-dec]").forEach(b => b.addEventListener("click", () => { const x = deck.cards.find(c => c.id === b.dataset.dec); setQty(deck, b.dataset.dec, (x ? x.n : 0) - 1); saveDeck(deck).then(rerender); }));
+  host.querySelectorAll("[data-sugadd]").forEach(b => b.addEventListener("click", () => { const id = b.dataset.sugadd; const x = deck.cards.find(c => c.id === id); setQty(deck, id, (x ? x.n : 0) + Number(b.dataset.n)); saveDeck(deck).then(rerender); toast(`Added ${b.dataset.n} × ${DK.byId.get(id).name}`); }));
+  $("#dkCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText(deckText(deck)); dv.copied = true; } catch (e) { toast("Copying isn't allowed here"); } rerender(); setTimeout(() => { dv.copied = false; }, 2500); });
+  $("#dkDel").addEventListener("click", async () => { if (!dv.confirmDel) { dv.confirmDel = true; return rerender(); } dv.confirmDel = false; const name = deck.name; await Store.removeDeck(deck); dv.open = null; rerender(); toast(`Deleted ${name}`); });
+  // prices for the deck and the suggestions; redraw once they arrive unless you're typing (the next keystroke redraws anyway)
+  ensurePrices([...lineIds, ...sugIds]).catch(() => false).then(changed => {
+    const typing = document.activeElement && ["dkQ", "dkName"].includes(document.activeElement.id);
+    if (changed && ticket === deckRender && !$("#decks").hidden && !typing) renderDecks();
+  });
+}
+
+
 /* ---------- wiring ---------- */
 document.addEventListener("error", e => {
   const im = e.target; if (!im || im.tagName !== "IMG" || !im.dataset.fail) return;
+  if (im.dataset.alt) { const a = im.dataset.alt; delete im.dataset.alt; im.src = a; return; }
   if (im.dataset.fail === "ph") { const d = document.createElement("div"); d.className = "ph"; d.textContent = inClaude ? "Catalogue image shows on the hosted copy" : "Catalogue image unavailable"; im.replaceWith(d); }
   else im.remove();
 }, true);
 document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => b.closest("dialog").close()));
 $("#fab").addEventListener("click", openAdd); $("#emptyAdd").addEventListener("click", openAdd);
 $("#list").addEventListener("click", e => { const r = e.target.closest("[data-open]"); if (r) openDetail(r.dataset.open); });
+$("#gallery").addEventListener("click", e => { const r = e.target.closest("[data-open]"); if (r) openDetail(r.dataset.open); });
+wireGalleryTilt();
+$("#fPics").value = Prefs.pics;
+$("#fPics").addEventListener("change", e => { Prefs.pics = e.target.value; try { localStorage.setItem("pokelab-pics", Prefs.pics); } catch (x) {} renderList(); });
+function setTab(t, fromHash) {
+  if (!["binder", "gallery", "decks"].includes(t)) t = "binder";
+  view.tab = t; document.body.dataset.tab = t;
+  document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
+  if (!fromHash) { try { history.replaceState(null, "", t === "binder" ? location.pathname + location.search : "#" + t); } catch (x) {} }
+  renderList();
+}
+document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
+$(".tabs").addEventListener("keydown", e => {
+  const tabs = [...document.querySelectorAll(".tab")]; const i = tabs.indexOf(document.activeElement); if (i < 0) return;
+  const d = { ArrowRight: 1, ArrowLeft: -1 }[e.key]; if (!d) return; e.preventDefault();
+  const n = tabs[(i + d + tabs.length) % tabs.length]; n.focus(); setTab(n.dataset.tab);
+});
+addEventListener("hashchange", () => setTab(location.hash.slice(1), true));
 $("#q").addEventListener("input", e => { view.q = e.target.value; renderList(); });
 $("#fSet").addEventListener("change", e => { view.set = e.target.value; renderList(); });
 $("#fRarity").addEventListener("change", e => { view.rarity = e.target.value; renderList(); });
 $("#fSort").addEventListener("change", e => { view.sort = e.target.value; try { localStorage.setItem("pokelab-sort", view.sort); } catch (x) {} renderList(); });
 try { const s = localStorage.getItem("pokelab-sort"); if (s) { view.sort = s; $("#fSort").value = s; } } catch (x) {}
-Store.onChange(() => { renderList(); if ($("#detailSheet").open) renderDetail(); });
+Store.onChange(() => {
+  const typing = document.activeElement && ["dkQ", "dkName", "arQ", "q", "mkIn"].includes(document.activeElement.id);
+  if (!(view.tab === "decks" && typing)) renderList();
+  if ($("#detailSheet").open) renderDetail();
+});
 
 (async function boot() {
   $("#filters").hidden = true; $("#empty").hidden = false;
@@ -1099,7 +1693,8 @@ Store.onChange(() => { renderList(); if ($("#detailSheet").open) renderDetail();
   if (!(AI.sample && AI.images)) $("#emptyText").textContent = ocrUsable()
     ? "Tap Add a card and take a photo of the front. The app reads the collector number to find the card, then logs it with its official set, rarity and live price. You can measure centering from the photo too."
     : "Tap Add a card, add a photo of the front, then find it by name or number. It's logged with its official set, number, rarity and price.";
-  renderList();
+  view.tab = ["gallery", "decks"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "binder";
+  setTab(view.tab, true);
   refreshPrices(false).catch(() => {});
 })();
 })();
