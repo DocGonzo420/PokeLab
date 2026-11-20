@@ -15,6 +15,14 @@ Live site: https://docgonzo420.github.io/PokeLab/
 - **Deck data:** `deck.json` (types, attacks, abilities, regulation marks and what each Trainer does), built from the same repo with `python3 tools/build_deck.py <path-to-that-repo> deck.json`. Standard means regulation marks H, I and J (since the April 2026 rotation); you can change the marks in the Decks tab when the format rotates.
 - **Condition:** measure centering by dragging guides over your photo (limits follow PSA's front-centering standards), and pick the overall condition yourself. Inside Claude, Claude also estimates corners, edges and surface. Either way it's an estimate, not a PSA or CGC grade.
 
+## Cards in other languages
+
+Pick **Card language** at the top of Add card. The app remembers it, so switch back to English when you're done.
+
+- **Japanese, Korean and Traditional Chinese:** these prints share the Japanese set code and collector numbers, so type the set code printed at the bottom left of the card (like SV8a) and press Load. The app loads that set's card list from [TCGdex](https://tcgdex.dev), and photos, camera scans, binder pages and search then match within that set. Names come from TCGdex's Indonesian list, which uses the English Pokémon names, so Trainer names may be a little off, and the Japanese name is kept too. Korean card data isn't on TCGdex, so a Korean card is matched to its Japanese print.
+- **Prices for those cards:** the only free price is Cardmarket's for the Japanese print, in euros. TCGplayer prices aren't available for them. The binder shows that euro price and adds it beside your total rather than into it. Korean and Chinese copies often sell for less than Japanese ones.
+- **Simplified Chinese, and any other language:** no free catalogue lists these cards (Simplified Chinese sets are also numbered differently), so you type the name, number and set yourself. The set name and code stay filled in for the next card. You can set your own price for each card, on the card or later in its details.
+
 ## Gallery and decks
 
 - **Pictures:** show your photo and the catalogue picture side by side (the default) in the binder, gallery and decks, or just one of them.
