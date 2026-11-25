@@ -3,13 +3,12 @@
 <script>
 function findCard(cv) {
   const W = cv.width, H = cv.height, d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, W, H).data;
-  const g = new Float32Array(W * H);
-  for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = d[j] * 0.299 + d[j + 1] * 0.587 + d[j + 2] * 0.114;
-  const CAP = 36, gx = new Float32Array(W * H), gy = new Float32Array(W * H);
+  /* colour edges, so a yellow border on a white stand still shows */
+  const CAP = 40, gx = new Float32Array(W * H), gy = new Float32Array(W * H), diff = (a, b) => Math.max(Math.abs(d[a] - d[b]), Math.abs(d[a + 1] - d[b + 1]), Math.abs(d[a + 2] - d[b + 2]));
   for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
-    const i = y * W + x;
-    gx[i] = Math.min(CAP, Math.abs(g[i + 1] - g[i - 1])) / CAP;
-    gy[i] = Math.min(CAP, Math.abs(g[i + W] - g[i - W])) / CAP;
+    const i = y * W + x, j = i * 4;
+    gx[i] = Math.min(CAP, diff(j + 4, j - 4)) / CAP;
+    gy[i] = Math.min(CAP, diff(j + W * 4, j - W * 4)) / CAP;
   }
   /* allow a pixel of slack across each edge, then prefix sums along rows (top/bottom) and columns (sides) */
   const row = new Float32Array(H * (W + 1)), col = new Float32Array(W * (H + 1));
@@ -41,12 +40,28 @@ function findCard(cv) {
     for (let y = 1; y + h <= H - 2; y += 2) for (let x = 1; x + w <= W - 2; x += 2) tryBox(x, y, w, h);
   }
   if (!best) return null;
-  const c = best;
-  for (let dh = -2; dh <= 2; dh++) for (let dw = -2; dw <= 2; dw++) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) tryBox(c.x + dx, c.y + dy, c.w + dw, c.h + dh);
-  if (best.s < 0.42 || best.lo < 0.28) return null;
-  return { cx: (best.x + best.w / 2) / W * 100, cy: (best.y + best.h / 2) / H * 100, size: best.h / H * 100, score: best.s };
+  const refine = () => { const c = best; for (let dh = -2; dh <= 2; dh++) for (let dw = -2; dw <= 2; dw++) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) tryBox(c.x + dx, c.y + dy, c.w + dw, c.h + dh); };
+  refine();
+  /* a card's inner border is a rectangle too: take the biggest strong rectangle around the best one */
+  const inner = best, floor = inner.s * 0.8;
+  let outer = null;
+  for (let h = inner.h + 3; h <= H - 3; h += 2) for (const a of [0.94, 1, 1.06]) {
+    const w = Math.round(h * 63 / 88 * a);
+    for (let y = Math.max(1, inner.y + inner.h - h); y <= inner.y; y += 2) for (let x = Math.max(1, inner.x + inner.w - w); x <= inner.x; x += 2) {
+      if (x + w > W - 2 || y + h > H - 2) continue;
+      const r = rate(x, y, w, h);
+      if (r.s >= floor && r.lo >= 0.3 && (!outer || h > outer.h || (h === outer.h && r.s > outer.s))) outer = { ...r, x, y, w, h };
+    }
+  }
+  if (outer) { best = outer; refine(); }
+  if (best.s < 0.6 || best.lo < 0.3) return null;
+  /* a card has print inside it; an empty tray or shadow does not */
+  let busy = 0, n = 0;
+  for (let y = best.y + Math.round(best.h * 0.1); y < best.y + best.h * 0.9; y += 2) for (let x = best.x + Math.round(best.w * 0.1); x < best.x + best.w * 0.9; x += 2) { const i = y * W + x; busy += Math.max(gx[i], gy[i]); n++; }
+  best.busy = busy / n;
+  if (best.busy < 0.06) return null;
+  return { cx: (best.x + best.w / 2) / W * 100, cy: (best.y + best.h / 2) / H * 100, size: best.h / H * 100, score: best.s, busy: best.busy };
 }
-
 const cards=["ja/SV/SV8a/010","en/sv/sv03.5/006","ja/SV/SV2a/151","en/swsh/swsh12.5/GG01","zh-tw/SV/SV9/001"];
 const load=u=>new Promise((r,j)=>{const i=new Image();i.crossOrigin="anonymous";i.onload=()=>r(i);i.onerror=()=>r(null);i.src=u;});
 function bg(ctx,W,H,kind,seed){let x=seed;const rnd=()=>(x=(x*16807)%2147483647)/2147483647;
@@ -72,10 +87,10 @@ for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.
   const t0=performance.now(),r=findCard(sm),ms=(performance.now()-t0).toFixed(1);
   const want={cx:cx/W*100,cy:cy/H*100,size:fill*100};n++;
   const good=r&&Math.abs(r.cx-want.cx)<3&&Math.abs(r.cy-want.cy)<3&&Math.abs(r.size-want.size)<5;if(good)ok++;
-  lines.push(`${c} t${t} ${good?"OK ":"BAD"} want ${want.cx.toFixed(1)},${want.cy.toFixed(1)},${want.size.toFixed(1)} got ${r?r.cx.toFixed(1)+","+r.cy.toFixed(1)+","+r.size.toFixed(1)+" s"+r.score.toFixed(2):"none"} ${ms}ms`);
+  lines.push(`${c} t${t} ${good?"OK ":"BAD"} want ${want.cx.toFixed(1)},${want.cy.toFixed(1)},${want.size.toFixed(1)} got ${r?r.cx.toFixed(1)+","+r.cy.toFixed(1)+","+r.size.toFixed(1)+" s"+r.score.toFixed(2)+" b"+r.busy.toFixed(2):"none"} ${ms}ms`);
   if(!good){cv.style.width="150px";document.getElementById("pics").appendChild(cv);}
  }}
 /* empty scenes should give none */
-for(let k=0;k<4;k++){const sm=document.createElement("canvas");sm.width=120;sm.height=160;bg(sm.getContext("2d"),120,160,k,k*31+7);const r=findCard(sm);lines.push(`empty bg${k}: ${r?"FALSE HIT "+r.score.toFixed(2):"none ok"}`);}
+for(let k=0;k<4;k++){const sm=document.createElement("canvas");sm.width=120;sm.height=160;bg(sm.getContext("2d"),120,160,k,k*31+7);const r=findCard(sm);lines.push(`empty bg${k}: ${r?"FALSE HIT "+r.score.toFixed(2)+" b"+r.busy.toFixed(2):"none ok"}`);}
 out.textContent=`${ok}/${n} found\n`+lines.join("\n");document.title="done";})();
 </script>
