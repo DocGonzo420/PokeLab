@@ -17,11 +17,15 @@ Live site: https://docgonzo420.github.io/PokeLab/
 
 ## Cards in other languages
 
-Pick **Card language** at the top of Add card. The app remembers it, so switch back to English when you're done.
+Pick **Card language** at the top of Add card (or on the camera screen). The app remembers it, so switch back to English when you're done. The first time you pick a language, its whole card list downloads and is kept in the browser, refreshed every few days. There's no set code to type: photos, camera scans, binder pages and search match across every set of that language.
 
-- **Japanese, Korean and Traditional Chinese:** these prints share the Japanese set code and collector numbers, so type the set code printed at the bottom left of the card (like SV8a) and press Load. The app loads that set's card list from [TCGdex](https://tcgdex.dev), and photos, camera scans, binder pages and search then match within that set. Names come from TCGdex's Indonesian list, which uses the English Pokémon names, so Trainer names may be a little off, and the Japanese name is kept too. Korean card data isn't on TCGdex, so a Korean card is matched to its Japanese print.
-- **Prices for those cards:** the only free price is Cardmarket's for the Japanese print, in euros. TCGplayer prices aren't available for them. The binder shows that euro price and adds it beside your total rather than into it. Korean and Chinese copies often sell for less than Japanese ones.
-- **Simplified Chinese, and any other language:** no free catalogue lists these cards (Simplified Chinese sets are also numbered differently), so you type the name, number and set yourself. The set name and code stay filled in for the next card. You can set your own price for each card, on the card or later in its details.
+- **How these cards are read:** Japanese, Korean and Chinese cards print the set code and number small at the bottom left (like `sv8a 010/187`), so the scanner reads that corner larger, in two ways, and offers both results if they differ. A number whose total fits no set counts as a misread rather than a guess.
+- **Japanese:** every set on [TCGdex](https://tcgdex.dev) (about 13,000 cards), with pictures. Prices are Cardmarket's, in euros, counted in dollars at the European Central Bank rate from [Frankfurter](https://frankfurter.dev). TCGplayer doesn't price Japanese cards.
+- **Traditional Chinese:** TCGdex's own list (Sword & Shield through Scarlet & Violet), with pictures. Sets it hasn't listed yet use the Japanese entry, since these prints share the Japanese set codes and numbers.
+- **Korean:** TCGdex has Korean names for only a few sets, so the rest match by set code and number and show the Japanese name.
+- **Prices for Korean and Traditional Chinese cards:** no free source prices them, so the card shows the Japanese printing's Cardmarket price for reference, and it isn't counted in your total.
+- **Simplified Chinese:** sets have their own codes (like CSV8C) and come from [zsjy947/PTCG-card-data](https://github.com/zsjy947/PTCG-card-data) (CC0, updated weekly), which also names the matching English card. Pictures are the English printing's, and no free source has prices.
+- **Another language:** no free catalogue, so you type the name, number and set yourself, with a price of your own if you like. The set name and code stay filled in for the next card.
 
 ## Gallery and decks
 
