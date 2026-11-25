@@ -346,7 +346,7 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
 (()=>{const cv=document.createElement("canvas");cv.width=960;cv.height=1280;const ctx=cv.getContext("2d");
 const img=new Image();img.crossOrigin="anonymous";img.src="https://assets.tcgdex.net/en/sv/sv03.5/006/high.png";
 const spots=[null,{cx:480,cy:640,h:720},{cx:380,cy:600,h:520},{cx:560,cy:680,h:640}];window.__fake={spots,hold:null};
-function draw(){const sp=window.__fake.hold!=null?spots[window.__fake.hold]:spots[Math.floor(performance.now()/8000)%spots.length];window.__fake.cur=sp;
+function draw(){const hv=location.hash.slice(1),sp=hv!==""?spots[+hv]:spots[Math.floor(performance.now()/8000)%spots.length];window.__fake.cur=sp;
  ctx.fillStyle="#e4e2dc";ctx.fillRect(0,0,960,1280);ctx.fillStyle="#cfccc4";for(let i=0;i<30;i++)ctx.fillRect(0,i*43,960,3);
  if(sp&&img.complete&&img.naturalWidth){const w=sp.h*63/88;ctx.save();ctx.translate(sp.cx,sp.cy);ctx.rotate(0.012);ctx.shadowColor="rgba(0,0,0,.35)";ctx.shadowBlur=14;ctx.drawImage(img,-w/2,-sp.h/2,w,sp.h);ctx.restore();}
  requestAnimationFrame(draw);}
