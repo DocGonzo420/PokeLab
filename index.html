@@ -3092,6 +3092,29 @@ window.__dbg = { loadAsia, matchAsia, searchAsia, Asia, Cat, ScanPrefs, cardFrom
   setTab(view.tab, true);
   refreshPrices(false).catch(() => {});
 })();
+if (location.hash.startsWith("#dbg")) setTimeout(async () => {
+  const pre = document.createElement("pre"); pre.id = "dbgout"; pre.style.cssText = "white-space:pre-wrap;font-size:11px;position:relative;z-index:9999;background:#fff;color:#000"; document.body.prepend(pre);
+  const log = x => { pre.textContent += (typeof x === "string" ? x : JSON.stringify(x)) + "\n"; };
+  const D = window.__dbg;
+  const step = async (name, fn) => { const t = Date.now(); try { log(name + ": " + JSON.stringify(await fn()) + " (" + (Date.now() - t) + "ms)"); } catch (e) { log(name + " FAILED " + (e && e.message)); } };
+  await step("ja", async () => { const a = await D.loadAsia("ja"); return [a.cards.length, a.sets.length]; });
+  await step("ko", async () => { const a = await D.loadAsia("ko"); return [a.cards.length, a.cards.filter(c => !c.fromJa).length]; });
+  await step("zh-tw", async () => { const a = await D.loadAsia("zh-tw"); return [a.cards.length, a.cards.filter(c => !c.fromJa).length]; });
+  await step("zh-cn", async () => { const a = await D.loadAsia("zh-cn"); const c = a.cards.find(x => x.tid === "CSV8C-001"); return [a.cards.length, a.sets.length, c && c.set.total, c && D.enTwin(c) && D.enTwin(c).id, c && D.recImage(D.cardFromCatalogue(c))]; });
+  await step("matchJa", async () => D.matchAsia("H SV8a 010/187 RR", "ja").cands.map(c => c.id));
+  await step("matchJaFuzzy", async () => D.matchAsia("H SVBa O10/187", "ja").cands.map(c => c.id));
+  await step("matchKo", async () => D.matchAsia("G SV4K 012/066 U", "ko").cands.map(c => c.id + " " + c.name + (c.fromJa ? " (ja)" : "")));
+  await step("matchKoNew", async () => D.matchAsia("H SV8a 010/187", "ko").cands.map(c => c.id + " " + c.name + (c.fromJa ? " (ja)" : "")));
+  await step("matchCn", async () => D.matchAsia("G CSV8C 001/207 C", "zh-cn").cands.map(c => c.id + " " + c.name + " " + c.nameEn));
+  await step("searchCn", async () => D.searchAsia("CSV8C 1", "zh-cn", 5).map(c => c.id));
+  await step("searchJa", async () => D.searchAsia("SV8a 200", "ja", 5).map(c => c.id + c.name));
+  await step("fx", async () => [await D.loadFX(), D.FX.rate]);
+  for (const id of ["ja:SV8a-010", "zh-tw:SV8a-010", "ko:SV4K-012", "ko:SV8a-010"]) await step("price " + id, async () => { const L = id.split(":")[0]; const c = D.Asia.data[L].cards.find(x => x.id === id); const r = D.cardFromCatalogue(c); const p = await D.priceFromAsia(r); return [p && p.eur, p && p.ref, p && p.rarity, D.pickPrice({ ...r, price: p })]; });
+  const urls = location.hash.slice(5).split(",").filter(Boolean);
+  for (const u of urls) { const [lang, ...rest] = u.split("|"); await step("ocr " + rest.join("|"), () => D.ocrUrl(rest.join("|"), lang)); }
+  log("DONE");
+}, 2500);
+
 })();
 </script>
 
