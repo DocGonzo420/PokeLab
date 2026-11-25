@@ -44,7 +44,7 @@ function findCard(cv) {
   refine();
   /* a card's inner border is a rectangle too: take the biggest strong rectangle around the best one */
   /* (only a little bigger: a tray or stand around the card is a rectangle too) */
-  const inner = best, floor = inner.s * 0.88;
+  const inner = best, floor = inner.s * 0.94;
   let outer = null;
   for (let h = inner.h + 3; h <= Math.min(H - 3, inner.h * 1.16); h += 2) for (const a of [0.94, 1, 1.06]) {
     const w = Math.round(h * 63 / 88 * a);
