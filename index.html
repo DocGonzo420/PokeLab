@@ -185,7 +185,6 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .qty{display:flex;align-items:center;gap:6px}
 .qty button{width:42px;height:42px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:18px}
 .qty input{text-align:center;width:56px;flex:none}
-.setrow{display:flex;align-items:center;gap:6px}.setrow input{flex:1;min-width:0}
 
 /* Grade "slab label" */
 .slab{border:1px solid var(--line);border-radius:12px;overflow:hidden}
@@ -457,7 +456,7 @@ async function loadCatalogue() {
 }
 function cardImage(c, large) {
   if (!c) return "";
-  if (c.lang) return c.im ? c.im + (large ? "/high.webp" : "/low.webp") : "";
+  if (c.lang) return asiaImage(c, large);
   if (c.im === 0) return `https://images.pokemontcg.io/${c.set.id}/${c.number}${large ? "_hires" : ""}.png`;
   if (c.im === 1) return `https://images.scrydex.com/pokemon/${c.id}/${large ? "large" : "small"}`;
   return large ? String(c.im).replace(/\/small$/, "/large").replace(/\.png$/, "_hires.png") : c.im;
@@ -465,10 +464,227 @@ function cardImage(c, large) {
 function brief(c) {
   return { id: c.id, name: c.name, number: c.number, set: c.set.name, setCode: c.set.code, printedTotal: c.set.total, series: c.set.series, released: c.set.released, rarity: c.rarity || "none listed" };
 }
+/* ---------- Japanese, Korean and Chinese cards ----------
+   Japanese, Korean and Traditional Chinese come from TCGdex. Korean and Traditional Chinese
+   prints carry the same set codes and numbers as the Japanese ones, so sets TCGdex hasn't
+   filled in for those languages fall back to the Japanese entry. Simplified Chinese sets have
+   their own codes (CSV8C and so on) and come from a free weekly community list (CC0) that also
+   names the matching English printing. Each list loads the first time its language is picked. */
+const LANGS = [["en", "English"], ["ja", "Japanese"], ["ko", "Korean"], ["zh-tw", "Chinese (Traditional)"], ["zh-cn", "Chinese (Simplified)"]];
+const langName = l => (LANGS.find(x => x[0] === l) || [l, l])[1];
+const scanLang = () => (typeof ScanPrefs !== "undefined" && LANGS.some(x => x[0] === ScanPrefs.lang)) ? ScanPrefs.lang : "en";
+const normName = s => String(s || "").normalize("NFKC").toLowerCase().replace(/[\s・·.,'’`\-<>＜＞]+/g, "");
+const codeExact = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+/* letters and digits the text reader mixes up count as the same */
+const codeFuzzy = s => codeExact(s).replace(/0/g, "O").replace(/1/g, "I").replace(/5/g, "S").replace(/8/g, "B").replace(/2/g, "Z");
+const Asia = { data: {}, loading: {} };
+const CN_BASE = "https://cdn.jsdelivr.net/gh/zsjy947/PTCG-card-data@master/data/";
+const TDX = "https://api.tcgdex.net/v2/";
+async function cachedJSON(url, maxAge) {
+  const key = "pokelab-cat-at:" + url;
+  let box = null, stale = null;
+  try { box = window.caches ? await caches.open("pokelab-catalogues") : null; } catch (e) {}
+  if (box) {
+    try {
+      const hit = await box.match(url);
+      if (hit) { const at = Number(localStorage.getItem(key) || 0); if (Date.now() - at < maxAge) return await hit.json(); stale = hit; }
+    } catch (e) {}
+  }
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw Object.assign(new Error("HTTP " + r.status), { status: r.status });
+    if (box) { try { await box.put(url, r.clone()); localStorage.setItem(key, String(Date.now())); } catch (e) {} }
+    return await r.json();
+  } catch (e) { if (stale) return await stale.json(); throw e; }
+}
+function asiaIndex(lang, cards, sets) {
+  const byNum = new Map(), byExact = new Map(), byFuzzy = new Map();
+  for (const c of cards) {
+    Cat.byId.set(c.id, c);
+    const a = byNum.get(c.nn); if (a) a.push(c); else byNum.set(c.nn, [c]);
+  }
+  for (const s of sets) {
+    if (!s.code) continue;
+    for (const [m, k] of [[byExact, codeExact(s.code)], [byFuzzy, codeFuzzy(s.code)]]) { const a = m.get(k); if (a) a.push(s); else m.set(k, [s]); }
+  }
+  return { lang, cards, sets, byNum, byExact, byFuzzy };
+}
+function tdxSets(lang, list) {
+  const m = new Map();
+  for (const s of list || []) if (s && s.id) m.set(s.id, { id: lang + ":" + s.id, sid: s.id, name: s.name || s.id, series: langName(lang) + " printing", total: (s.cardCount && (s.cardCount.official || s.cardCount.total)) || null, code: s.id, released: "", lang });
+  return m;
+}
+function tdxCard(lang, c, set, extra) {
+  const i = c.id.lastIndexOf("-");
+  const number = c.localId || c.id.slice(i + 1);
+  return { lang, id: lang + ":" + c.id, tid: c.id, set, number, name: c.name || "", rarity: "", supertype: "", img: c.image || "", n: normName(c.name), nn: normNum(number), ...extra };
+}
+async function loadTdx(lang, onStatus) {
+  onStatus && onStatus(`Loading the ${langName(lang)} card list (first time only)…`);
+  const [sets, cards] = await Promise.all([cachedJSON(TDX + lang + "/sets", 7 * 864e5), cachedJSON(TDX + lang + "/cards", 7 * 864e5)]);
+  return { sets: tdxSets(lang, sets), cards: Array.isArray(cards) ? cards.filter(c => c && c.id && c.id.lastIndexOf("-") > 0) : [] };
+}
+async function buildJa(onStatus) {
+  const { sets, cards } = await loadTdx("ja", onStatus);
+  const out = [];
+  for (const c of cards) {
+    const sid = c.id.slice(0, c.id.lastIndexOf("-"));
+    let set = sets.get(sid); if (!set) { set = { id: "ja:" + sid, sid, name: sid, series: "Japanese printing", total: null, code: sid, released: "", lang: "ja" }; sets.set(sid, set); }
+    out.push(tdxCard("ja", c, set));
+  }
+  return asiaIndex("ja", out, [...sets.values()]);
+}
+/* Korean and Traditional Chinese: the language's own entries, then the Japanese ones it lacks */
+async function buildTwin(lang, onStatus) {
+  const ja = await loadAsia("ja", onStatus);
+  const { sets, cards } = await loadTdx(lang, onStatus);
+  const out = [], have = new Set(), jaById = new Map(ja.cards.map(c => [c.tid, c]));
+  const setFor = sid => {
+    let s = sets.get(sid);
+    const js = ja.sets.find(x => x.sid === sid);
+    if (!s) { s = { id: lang + ":" + sid, sid, name: js ? js.name : sid, series: langName(lang) + " printing", total: js ? js.total : null, code: sid, released: "", lang }; sets.set(sid, s); }
+    else if (!s.total && js) s.total = js.total;
+    return s;
+  };
+  for (const c of cards) {
+    const sid = c.id.slice(0, c.id.lastIndexOf("-"));
+    const twin = jaById.get(c.id);
+    out.push(tdxCard(lang, { ...c, image: c.image || (twin && twin.img) || "" }, setFor(sid)));
+    have.add(c.id);
+  }
+  for (const j of ja.cards) {
+    if (have.has(j.tid)) continue;
+    out.push({ ...j, lang, id: lang + ":" + j.tid, set: setFor(j.set.sid), fromJa: true });
+  }
+  return asiaIndex(lang, out, [...sets.values()]);
+}
+async function buildCn(onStatus) {
+  onStatus && onStatus("Loading the Simplified Chinese card list (first time only)…");
+  const [idx, tdxList] = await Promise.all([cachedJSON(CN_BASE + "sets_index.json", 3 * 864e5), cachedJSON(TDX + "zh-cn/sets", 7 * 864e5).catch(() => [])]);
+  const printed = new Map(); for (const s of tdxList || []) if (s && s.id && s.cardCount && s.cardCount.official) printed.set(String(s.id).toUpperCase(), s.cardCount.official);
+  const list = []; const seen = new Set();
+  for (const s of idx || []) if (s && s.id && s.count > 0 && !seen.has(s.id) && /^[A-Za-z0-9.\-]+$/.test(s.id)) { seen.add(s.id); list.push(s); }
+  const sets = [], cards = []; let next = 0, done = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const s = list[next++];
+      let rows = [];
+      try { rows = await cachedJSON(CN_BASE + "cards/" + encodeURIComponent(s.id) + ".json", 3 * 864e5); } catch (e) {}
+      const set = { id: "zh-cn:" + s.id, sid: s.id, name: s.name || s.id, series: "Chinese (Simplified) printing", total: printed.get(String(s.code || s.id).toUpperCase()) || null, code: s.code || s.id, released: "", lang: "zh-cn" };
+      sets.push(set);
+      for (const r of Array.isArray(rows) ? rows : []) {
+        if (!r || !r.cardIndex || !r.cardName) continue;
+        cards.push({ lang: "zh-cn", id: "zh-cn:" + s.id + "-" + r.cardIndex, tid: s.id + "-" + r.cardIndex, set, number: String(r.cardIndex), name: String(r.cardName), rarity: r.rarity ? String(r.rarity) : "", supertype: "", img: "",
+          nameEn: r.nameEn ? String(r.nameEn) : "", twinCode: r.setCodeEn ? String(r.setCodeEn) : "", twinNum: r.cardIndexEn ? String(r.cardIndexEn) : "", n: normName(r.cardName), nn: normNum(r.cardIndex) });
+      }
+      done++; onStatus && onStatus(`Loading the Simplified Chinese card list (first time only)… ${Math.round(done / list.length * 100)}%`);
+    }
+  };
+  await Promise.all(Array.from({ length: 8 }, worker));
+  if (!cards.length) throw new Error("empty list");
+  return asiaIndex("zh-cn", cards, sets);
+}
+function loadAsia(lang, onStatus) {
+  if (Asia.data[lang]) return Promise.resolve(Asia.data[lang]);
+  if (!Asia.loading[lang]) {
+    const build = lang === "ja" ? buildJa : lang === "zh-cn" ? buildCn : l => buildTwin(lang, l);
+    Asia.loading[lang] = build(onStatus).then(d => { Asia.data[lang] = d; return d; }).finally(() => { delete Asia.loading[lang]; });
+  }
+  return Asia.loading[lang];
+}
+/* the English printing of a Simplified Chinese card, from the code and number the list gives */
+let enByCode = null;
+function enTwin(c) {
+  if (!c || !c.twinCode || !Cat.ready) return null;
+  if (!enByCode) { enByCode = new Map(); for (const e of Cat.cards) if (e.set.code) enByCode.set(e.set.code.toUpperCase() + "|" + e.nn, e); }
+  return enByCode.get(c.twinCode.toUpperCase() + "|" + normNum(c.twinNum)) || null;
+}
+function asiaImage(c, large) {
+  if (c.img) return c.img + (large ? "/high.webp" : "/low.webp");
+  const t = c.lang === "zh-cn" ? enTwin(c) : null;
+  return t ? cardImage(t, large) : "";
+}
+/* a saved card's catalogue picture, even before its language's list has loaded */
+function recImage(rec, large) {
+  const cat = Cat.byId.get(rec.cardId); if (cat) return cardImage(cat, large);
+  return rec.lang ? ((large ? rec.imgL : rec.img) || rec.img || "") : "";
+}
+function asiaNote(c) {
+  if (c.fromJa) return `${langName(c.lang)} name not in the free list, so this shows the Japanese one`;
+  if (c.lang === "zh-cn") return c.nameEn ? `English: ${c.nameEn}` : "";
+  return "";
+}
+/* collector numbers like 010/187 (and TG05/TG30) read off a card */
+function readNumbers(text) {
+  const t = String(text || "").replace(/[|\\]/g, "/");
+  const fix = d => d.replace(/[Oo]/g, "0").replace(/[Il]/g, "1");
+  const re = /(?:\b|(?<=[A-Z]))(TG|GG|SV|RC|SH|H)?([0-9OoIl]{1,3}[a-z]?)\s*\/\s*(?:TG|GG|SV|RC|SH|H)?\s?([0-9OoIl]{2,3})\b/g;
+  const found = []; let m;
+  while ((m = re.exec(t))) {
+    if (!/\d/.test(m[2] + m[3])) continue;
+    const total = parseInt(fix(m[3]), 10), raw = m[0].replace(/\s+/g, "");
+    if (m[1]) found.push({ num: normNum(m[1] + fix(m[2])), total, raw });
+    found.push({ num: normNum(fix(m[2])), total, raw });
+  }
+  return found;
+}
+/* match a Japanese, Korean or Chinese card by its set code and number, both printed in Latin letters */
+function matchAsia(text, lang) {
+  const A = Asia.data[lang]; if (!A || !text) return { cands: [], number: "" };
+  const found = readNumbers(text);
+  if (!found.length) return { cands: [], number: "" };
+  const toks = String(text).toUpperCase().replace(/[^A-Z0-9.\-]+/g, " ").split(" ").filter(x => x.length >= 2 && /[A-Z]/.test(x));
+  const exact = new Set(), fuzzy = new Set();
+  for (const x of toks) {
+    for (const s of A.byExact.get(codeExact(x)) || []) exact.add(s);
+    for (const s of A.byFuzzy.get(codeFuzzy(x)) || []) fuzzy.add(s);
+  }
+  const score = new Map();
+  for (const f of found) for (const c of A.byNum.get(f.num) || []) {
+    let s = 5;
+    if (f.total && c.set.total === f.total) s += 3;
+    if (exact.has(c.set)) s += 6; else if (fuzzy.has(c.set)) s += 4;
+    if (!c.fromJa) s += 0.5;
+    if (s > (score.get(c) || 0)) score.set(c, s);
+  }
+  let list = [...score].sort((a, b) => b[1] - a[1]);
+  const coded = list.filter(([c]) => exact.has(c.set) || fuzzy.has(c.set));
+  if (coded.length) list = coded;
+  else { const tot = list.filter(([c]) => found.some(f => f.total && c.set.total === f.total)); if (tot.length) list = tot; }
+  return { cands: list.slice(0, 8).map(x => x[0]), number: found[0].raw };
+}
+function searchAsia(q, lang, limit) {
+  const A = Asia.data[lang]; if (!A) return [];
+  let num = null, total = null; const words = [], codes = new Set();
+  for (const tok of String(q).trim().split(/\s+/)) {
+    const m = tok.match(/^#?([A-Za-z]{0,5}\d+[A-Za-z]?)\/([A-Za-z]{0,5}\d+)$/);
+    if (m) { num = normNum(m[1]); total = parseInt(m[2].replace(/\D/g, ""), 10); continue; }
+    const sets = A.byExact.get(codeExact(tok)); if (sets && /[A-Za-z]/.test(tok)) { sets.forEach(s => codes.add(s)); continue; }
+    if (/^#?\d+[A-Za-z]?$/.test(tok)) { num = normNum(tok.replace("#", "")); continue; }
+    words.push(tok);
+  }
+  const w = normName(words.join(" ")), wl = norm(words.join(" "));
+  if (!num && !w && !codes.size) return [];
+  const out = [];
+  for (const c of (num ? A.byNum.get(num) || [] : A.cards)) {
+    let s = 1;
+    if (codes.size) { if (!codes.has(c.set)) continue; s += 4; }
+    if (num && total && c.set.total === total) s += 2;
+    if (w) {
+      const en = c.nameEn ? norm(c.nameEn) : "";
+      if (c.n === w || (wl && en === wl)) s += 6; else if (c.n.includes(w) || (wl && en.includes(wl))) s += 3;
+      else if (normName(c.set.name).includes(w)) s += 1; else continue;
+    }
+    out.push([s, c]); if (!num && !codes.size && out.length > 4000) break;
+  }
+  out.sort((a, b) => b[0] - a[0]);
+  return out.slice(0, limit).map(x => x[1]);
+}
 /* free-text search over the catalogue */
 function searchCatalogue(q, limit = 30) {
-  const pool = foreignReady() ? Foreign.cards : isForeignLang() ? [] : Cat.cards;
-  if (!Cat.ready && pool === Cat.cards) return [];
+  const L = scanLang();
+  if (L !== "en" && Asia.data[L]) { const a = searchAsia(q, L, limit); if (a.length) return a; }
+  if (!Cat.ready) return [];
   const raw = String(q || "").trim();
   if (!raw) return [];
   let num = null, total = null; const words = [];
@@ -479,20 +695,18 @@ function searchCatalogue(q, limit = 30) {
     words.push(tok);
   }
   const w = norm(words.join(" "));
-  const local = pool === Cat.cards ? "" : words.join(" ").trim();
   const out = [];
-  for (const c of pool) {
+  for (const c of Cat.cards) {
     let s = 0;
     if (num) { if (c.nn !== num) continue; s += 4; if (total && c.set.total === total) s += 3; }
-    if (local && c.nameLocal && c.nameLocal.includes(local)) s += 6;
-    else if (w) {
+    if (w) {
       if (c.n === w) s += 6; else if (c.n.startsWith(w)) s += 4; else if (c.n.includes(w)) s += 3;
       else if (c.set.n.includes(w) || norm(c.set.code) === w) s += 1.5;
       else {
         const parts = w.split(" "); const hay = c.n + " " + c.set.n + " " + norm(c.set.code);
         if (parts.every(p => hay.includes(p))) s += 2; else continue;
       }
-    } else if (local) continue;
+    }
     out.push([s + c.set.released.slice(0, 4) / 10000, c]);
   }
   out.sort((a, b) => b[0] - a[0]);
@@ -500,7 +714,6 @@ function searchCatalogue(q, limit = 30) {
 }
 /* score catalogue entries against what was read off the photo */
 function matchRead(read) {
-  if (foreignReady() && read) { const nm = String(read.number || "").match(/(\d+)/); return nm ? Foreign.cards.filter(c => c.nn === normNum(nm[1])).slice(0, 8) : []; }
   if (!Cat.ready || !read) return [];
   const name = norm(read.name), code = norm(read.setCode), sname = norm(read.setName);
   let num = null, total = null;
@@ -525,19 +738,12 @@ function matchRead(read) {
 
 /* match the text a reader pulled off the photo (collector number first, then names) */
 function matchOCR(text) {
-  if (foreignReady()) return matchForeignOCR(text);
-  if (isManualLang() || isForeignLang()) { const r = matchForeignOCR(text); return { cands: [], number: r.number }; }
+  const L = scanLang();
+  if (L !== "en") return matchAsia(text, L);
   if (!Cat.ready || !text) return { cands: [], number: "" };
   const t = String(text).replace(/[|\\]/g, "/");
   const fix = d => d.replace(/[Oo]/g, "0").replace(/[Il]/g, "1");
-  const re = /(?:\b|(?<=[A-Z]))(TG|GG|SV|RC|SH|H)?([0-9OoIl]{1,3}[a-z]?)\s*\/\s*(?:TG|GG|SV|RC|SH|H)?\s?([0-9OoIl]{2,3})\b/g;
-  const found = []; let m;
-  while ((m = re.exec(t))) {
-    if (!/\d/.test(m[2] + m[3])) continue;
-    const total = parseInt(fix(m[3]), 10), raw = m[0].replace(/\s+/g, "");
-    if (m[1]) found.push({ num: normNum(m[1] + fix(m[2])), total, raw });
-    found.push({ num: normNum(fix(m[2])), total, raw });
-  }
+  const found = readNumbers(t); let m;
   const promo = /\b(SWSH|SVP|SM|XY|BW|HGSS|DP|SV|TG|GG)\s?([0-9OoIl]{2,3})\b/g;
   while ((m = promo.exec(t))) found.push({ num: normNum(m[1] + fix(m[2])), total: null, raw: m[0].replace(/\s+/g, "") });
   const upper = " " + t.toUpperCase().replace(/[^A-Z0-9]+/g, " ") + " ";
@@ -559,104 +765,6 @@ function matchOCR(text) {
   return { cands, number: found.length ? found[0].raw : "" };
 }
 
-/* ---------- cards in other languages ----------
-   Japanese, Korean and Traditional Chinese prints of a set share the Japanese set code
-   and collector numbers, so they are looked up in TCGdex's Japanese list. Simplified
-   Chinese sets are numbered differently and no free catalogue lists their cards, so
-   those (and any other language) are typed in by hand. */
-const LANGS = [["en", "English"], ["ja", "Japanese"], ["ko", "Korean"], ["zh-tw", "Traditional Chinese"], ["zh-cn", "Simplified Chinese"], ["other", "Another language"]];
-const langLabel = k => (LANGS.find(l => l[0] === k) || [k, String(k || "")])[1];
-const JA_NUMBERED = new Set(["ja", "ko", "zh-tw"]);
-const LangPrefs = (() => {
-  const d = { lang: "en", set: "", mSet: "", mCode: "" };
-  try { const v = JSON.parse(localStorage.getItem("pokelab-lang") || "{}"); return { ...d, ...v, lang: LANGS.some(l => l[0] === v.lang) ? v.lang : "en" }; } catch (e) { return d; }
-})();
-function saveLangPrefs() { try { localStorage.setItem("pokelab-lang", JSON.stringify(LangPrefs)); } catch (e) {} }
-const Foreign = { lang: "", code: "", set: null, cards: [], busy: false, err: "", list: null, listBusy: false };
-const isForeignLang = () => JA_NUMBERED.has(LangPrefs.lang);
-const isManualLang = () => LangPrefs.lang !== "en" && !JA_NUMBERED.has(LangPrefs.lang);
-const foreignReady = () => isForeignLang() && Foreign.lang === LangPrefs.lang && Foreign.cards.length > 0;
-const TCGDEX_ASSETS = /^https:\/\/assets\.tcgdex\.net\/[a-z-]+\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
-function foreignSet(lang, code, name, total, series, released) {
-  return { id: lang + "-" + code, name: name || code, series: series || "", total: Number(total) || 0, code, released: released || "", n: norm(name || code), lang };
-}
-/* the Japanese set list, for the set code suggestions */
-async function loadForeignList() {
-  if (Foreign.list || Foreign.listBusy) return;
-  Foreign.listBusy = true;
-  try { const l = await getJSON("https://api.tcgdex.net/v2/ja/sets"); if (Array.isArray(l)) Foreign.list = l.filter(x => x && x.id).map(x => ({ id: String(x.id), name: String(x.name || "") })); }
-  catch (e) { /* the code can still be typed */ }
-  finally { Foreign.listBusy = false; }
-}
-async function loadForeignSet(code) {
-  code = String(code || "").trim();
-  const lang = LangPrefs.lang;
-  if (!code) { Object.assign(Foreign, { lang: "", code: "", set: null, cards: [], err: "" }); return; }
-  Foreign.busy = true; Foreign.err = "";
-  try {
-    await loadForeignList();
-    const hit = Foreign.list && Foreign.list.find(x => x.id.toLowerCase() === code.toLowerCase());
-    const id = hit ? hit.id : code;
-    const [ja, idn] = await Promise.all([
-      getJSON(`https://api.tcgdex.net/v2/ja/sets/${encodeURIComponent(id)}`),
-      // TCGdex's Indonesian list uses the English Pokémon names, so it gives readable names when it has the set
-      getJSON(`https://api.tcgdex.net/v2/id/sets/${encodeURIComponent(id)}`).catch(() => null)
-    ]);
-    if (!ja || !Array.isArray(ja.cards) || !ja.cards.length) throw Object.assign(new Error("empty"), { empty: true });
-    const latin = new Map(((idn && idn.cards) || []).filter(b => b && /[A-Za-z]/.test(b.name || "")).map(b => [b.localId, b.name]));
-    const total = (ja.cardCount && ja.cardCount.official) || ja.cards.length;
-    const set = foreignSet(lang, ja.id, (idn && idn.name) || ja.name, total, ja.serie && ja.serie.name, ja.releaseDate);
-    const cards = ja.cards.map(b => {
-      const nameLocal = String(b.name || ""), name = latin.get(b.localId) || nameLocal;
-      const c = { set, number: String(b.localId), name, nameLocal, rarity: "", supertype: "", id: `${lang}:${b.id}`, im: TCGDEX_ASSETS.test(b.image || "") ? b.image : "", lang, tcgdexId: String(b.id) };
-      c.n = norm(name); c.nn = normNum(c.number);
-      return c;
-    });
-    for (const c of cards) Cat.byId.set(c.id, c);
-    Object.assign(Foreign, { lang, code: ja.id, set, cards });
-    LangPrefs.set = ja.id; saveLangPrefs();
-  } catch (e) {
-    Object.assign(Foreign, { lang: "", code: "", set: null, cards: [] });
-    Foreign.err = e && (e.empty || e.status === 404) ? `TCGdex doesn't list a Japanese set with the code ${code}. Check the code printed at the bottom left of the card, or set the language to Another language and type the card in.`
-      : "The set list couldn't load just now. Check your connection and try again.";
-  } finally { Foreign.busy = false; }
-}
-/* a catalogue entry rebuilt from a saved card, so pictures work before its set is loaded again */
-function foreignFromRec(r) {
-  const set = foreignSet(r.lang, r.setCode || "", r.setName, r.printedTotal, r.series, r.released);
-  set.id = r.setId || set.id;
-  return { set, number: r.number, name: r.name, nameLocal: r.nameLocal || "", rarity: r.rarity || "", supertype: "", id: r.cardId, im: TCGDEX_ASSETS.test(r.image || "") ? r.image : "", lang: r.lang, tcgdexId: r.tcgdexId || "", manual: !!r.manual, n: norm(r.name), nn: normNum(r.number) };
-}
-function syncForeign() { for (const c of Store.cards) if (c.lang && c.cardId && !Cat.byId.has(c.cardId)) Cat.byId.set(c.cardId, foreignFromRec(c)); }
-function matchForeignOCR(text) {
-  const t = String(text || "").replace(/[|\\]/g, "/");
-  const fix = d => d.replace(/[Oo]/g, "0").replace(/[Il]/g, "1");
-  const re = /([0-9OoIl]{1,3})\s*\/\s*([0-9OoIl]{2,3})\b/g;
-  const score = new Map(); let m, first = "";
-  while ((m = re.exec(t))) {
-    if (!/\d/.test(m[1] + m[2])) continue;
-    const num = normNum(fix(m[1])), total = parseInt(fix(m[2]), 10);
-    if (!first) first = m[0].replace(/\s+/g, "");
-    for (const c of Foreign.cards) if (c.nn === num) score.set(c, Math.max(score.get(c) || 0, 5 + (c.set.total === total ? 3 : 0)));
-  }
-  return { cands: [...score].sort((a, b) => b[1] - a[1]).slice(0, 8).map(x => x[0]), number: first };
-}
-/* a card typed in by hand, for languages no free catalogue covers */
-function manualCard(f) {
-  const lang = LangPrefs.lang, code = String(f.code || "").trim(), setName = String(f.set || "").trim() || "Unlisted set";
-  const set = foreignSet(lang, code, setName, f.total, "", "");
-  set.id = lang + "-" + (code || norm(setName).replace(/ /g, "-") || "set");
-  const c = { set, number: String(f.number || "").trim(), name: String(f.name || "").trim(), nameLocal: "", rarity: String(f.rarity || "").trim(), supertype: "", id: `${lang}:manual:${uid()}`, im: "", lang, tcgdexId: "", manual: true, ownPrice: Number(f.price) > 0 ? Math.round(Number(f.price) * 100) / 100 : null };
-  c.n = norm(c.name); c.nn = normNum(c.number);
-  return c;
-}
-function ownPrice(v, finish) {
-  if (!(v > 0)) return null;
-  return { usd: { [finish || "normal"]: { low: null, mid: null, high: null, market: v } }, eur: null, source: "your own price", updated: "", url: "", fetchedAt: Date.now(), v: 2, own: true };
-}
-/* cards priced only on Cardmarket show the euro trend price */
-const eurOnly = c => !pickPrice(c) && c.price && c.price.eur && typeof c.price.eur.trend === "number" ? c.price.eur.trend : null;
-
 /* ---------- rarity tiers ---------- */
 function tier(r) {
   const s = String(r || "").toLowerCase();
@@ -668,7 +776,7 @@ function tier(r) {
 
 /* ---------- finishes and prices ---------- */
 const FINISHES = [["normal","Normal"],["holofoil","Holofoil"],["reverseHolofoil","Reverse holo"],["1stEditionHolofoil","1st Edition holo"],["1stEditionNormal","1st Edition"],["unlimitedHolofoil","Unlimited holo"]];
-const finishLabel = k => (FINISHES.find(f => f[0] === k) || [k, k ? k.replace(/([A-Z])/g, " $1").replace(/^./, x => x.toUpperCase()) : "Unknown"])[1];
+const finishLabel = k => k === "cardmarket" ? "Cardmarket, from euros" : (FINISHES.find(f => f[0] === k) || [k, k ? k.replace(/([A-Z])/g, " $1").replace(/^./, x => x.toUpperCase()) : "Unknown"])[1];
 function canonFinish(k) {
   const s = String(k || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   if (s.includes("reverse")) return "reverseHolofoil";
@@ -679,11 +787,32 @@ function canonFinish(k) {
   return k;
 }
 function pickPrice(card) {
-  const p = card.price; if (!p || !p.usd) return null;
-  const order = [card.finish, "holofoil", "normal", "reverseHolofoil", ...Object.keys(p.usd)];
-  for (const k of order) { const v = k && p.usd[k]; if (v && typeof v.market === "number") return { finish: k, value: v.market }; }
-  for (const k of order) { const v = k && p.usd[k]; if (v && typeof v.mid === "number") return { finish: k, value: v.mid }; }
+  const p = card.price; if (!p) return null;
+  if (p.ref) return null; /* another printing's price: shown for reference, never counted */
+  if (p.usd) {
+    const order = [card.finish, "holofoil", "normal", "reverseHolofoil", ...Object.keys(p.usd)];
+    for (const k of order) { const v = k && p.usd[k]; if (v && typeof v.market === "number") return { finish: k, value: v.market }; }
+    for (const k of order) { const v = k && p.usd[k]; if (v && typeof v.mid === "number") return { finish: k, value: v.mid }; }
+  }
+  /* Japanese cards are priced on Cardmarket in euros: counted in dollars at today's rate */
+  if (card.lang && p.eur && FX.rate) {
+    const e = [p.eur.trend, p.eur.avg30, p.eur.avg].find(v => typeof v === "number" && v > 0);
+    if (e) return { finish: "cardmarket", value: e * FX.rate, eur: e };
+  }
   return null;
+}
+const FX = { rate: null, at: 0 };
+try { const o = JSON.parse(localStorage.getItem("pokelab-fx") || "null"); if (o && o.rate > 0) Object.assign(FX, o); } catch (x) {}
+/* euro to dollar rate from the European Central Bank, through Frankfurter (free, no key), checked daily */
+async function loadFX() {
+  if (FX.rate && Date.now() - FX.at < 864e5) return false;
+  for (const u of ["https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD", "https://api.frankfurter.app/latest?from=EUR&to=USD"]) {
+    try {
+      const j = await getJSON(u, 8000); const r = j && j.rates && j.rates.USD;
+      if (typeof r === "number" && r > 0) { FX.rate = r; FX.at = Date.now(); try { localStorage.setItem("pokelab-fx", JSON.stringify(FX)); } catch (x) {} return true; }
+    } catch (e) {}
+  }
+  return false;
 }
 const PriceState = { blocked: false, tried: false, busy: false };
 const PriceQueue = { cards: [], t: 0 };
@@ -747,24 +876,33 @@ async function priceFromTCGdex(card) {
   }
   return null;
 }
-/* other-language prints: TCGdex has Cardmarket prices for the Japanese print (in euros), and no TCGplayer prices */
-async function priceFromTCGdexJa(card) {
-  const d = await getJSON(`https://api.tcgdex.net/v2/ja/cards/${encodeURIComponent(card.tcgdexId)}`);
-  const p = fromTCGdex(d); if (!p) return null;
-  p.source = "TCGdex (Cardmarket price of the Japanese print)";
-  if (d && d.rarity && d.rarity !== "None") p.rarity = String(d.rarity);
-  return p;
+/* Japanese, Korean and Traditional Chinese cards: TCGdex for that printing. Korean and Traditional
+   Chinese cards share Cardmarket's Japanese listing, so their price is marked as the Japanese one. */
+async function priceFromAsia(card) {
+  if (card.lang === "zh-cn") return null;
+  const tid = String(card.cardId).replace(/^[a-z]{2}(-[a-z]{2})?:/, "");
+  const get = async lang => { try { return await getJSON(TDX + lang + "/cards/" + encodeURIComponent(tid)); } catch (e) { if (!e || !e.status) throw e; return null; } };
+  let d = card.fromJa ? null : await get(card.lang);
+  let p = fromTCGdex(d);
+  let j = null;
+  if (!p && card.lang !== "ja") { j = await get("ja"); p = fromTCGdex(j); }
+  const info = d || j; if (!info && !p) return null;
+  const out = p || { usd: {}, eur: null, source: "TCGdex", updated: "", url: "", fetchedAt: Date.now(), v: 2 };
+  out.source = "TCGdex (Cardmarket)";
+  if (card.lang !== "ja" && (out.eur || hasUsd(out))) out.ref = "the Japanese printing";
+  const rar = info && info.rarity; if (rar && rar !== "None") out.rarity = rar;
+  return out;
 }
 const hasUsd = p => p && p.usd && Object.keys(p.usd).length;
 /* fetch prices for many cards: TCGdex first (updated daily), then batched pokemontcg.io for the rest */
 async function fetchPrices(cards) {
   const out = new Map(); let reached = false;
-  const uniq = [...new Map(cards.filter(c => c.cardId && !c.manual && (!c.lang || c.tcgdexId)).map(c => [c.cardId, c])).values()];
+  const uniq = [...new Map(cards.filter(c => c.cardId).map(c => [c.cardId, c])).values()];
   let next = 0;
   const worker = async () => {
     while (next < uniq.length) {
       const card = uniq[next++];
-      try { const p = await (card.lang ? priceFromTCGdexJa(card) : priceFromTCGdex(card)); reached = true; if (p) out.set(card.cardId, p); }
+      try { const p = card.lang ? await priceFromAsia(card) : await priceFromTCGdex(card); reached = true; if (p) out.set(card.cardId, p); }
       catch (e) { if (e && e.status) reached = true; }
     }
   };
@@ -1156,6 +1294,11 @@ async function scanLoop(run) {
   try { w = await ocrWorker(t => { if (run === Scan.run) hint.textContent = t; }); }
   catch (e) { if (run === Scan.run) hint.textContent = "The text reader couldn't load, so the camera can't read numbers. Tap Scan now and search instead."; return; }
   if (run !== Scan.run) return;
+  if (scanLang() !== "en" && !Asia.data[scanLang()]) {
+    try { await loadAsia(scanLang(), t => { if (run === Scan.run) hint.textContent = t; }); }
+    catch (e) { if (run === Scan.run) hint.textContent = `The ${langName(scanLang())} card list couldn't load, so cards can't be matched yet. Check your connection and start the scan again.`; return; }
+    if (run !== Scan.run) return;
+  }
   if (scanShotMode()) { hint.textContent = Scan.added ? scanAddedMsg() : "Line the card up in the frame, then tap Scan card."; return; }
   const guide = "Line the frame up with the card, with the card number inside the yellow box.";
   hint.textContent = Scan.skipKey ? scanAddedMsg() : guide;
@@ -1267,16 +1410,18 @@ function imgTag(src, alt, cls = "") {
 const view = { q: "", set: "", rarity: "", sort: "value", tab: "binder", arranging: false, focusAfter: null };
 const photoCache = new Map();
 function cardFromCatalogue(c) {
-  const rec = { cardId: c.id, name: c.name, number: c.number, setId: c.set.id, setName: c.set.name, setCode: c.set.code, printedTotal: c.set.total, series: c.set.series, released: c.set.released, rarity: c.rarity || "", supertype: c.supertype || "" };
-  if (c.lang) Object.assign(rec, { lang: c.lang, tcgdexId: c.tcgdexId || "", image: c.im || "", nameLocal: c.nameLocal || "", manual: !!c.manual });
-  return rec;
+  if (c.lang) {
+    const t = c.lang === "zh-cn" ? enTwin(c) : null;
+    return { cardId: c.id, name: c.name, number: c.number, setId: c.set.id, setName: c.set.name, setCode: c.set.code, printedTotal: c.set.total, series: c.set.series, released: "", rarity: c.rarity || "", supertype: "",
+      lang: c.lang, img: cardImage(c, false), imgL: cardImage(c, true), fromJa: !!c.fromJa, nameEn: c.nameEn || "", twinId: t ? t.id : "" };
+  }
+  return { cardId: c.id, name: c.name, number: c.number, setId: c.set.id, setName: c.set.name, setCode: c.set.code, printedTotal: c.set.total, series: c.set.series, released: c.set.released, rarity: c.rarity || "", supertype: c.supertype || "" };
 }
 function renderTotals(cards) {
-  let total = 0, priced = 0, count = 0, euros = 0; const sets = new Set();
-  for (const c of cards) { const q = c.qty || 1; count += q; sets.add(c.setId); const p = pickPrice(c); if (p) { total += p.value * q; priced += q; } else { const e = eurOnly(c); if (e != null) { euros += e * q; priced += q; } } }
+  let total = 0, priced = 0, count = 0; const sets = new Set();
+  for (const c of cards) { const q = c.qty || 1; count += q; sets.add(c.setId); const p = pickPrice(c); if (p) { total += p.value * q; priced += q; } }
   $("#totalValue").textContent = usd(total);
   const bits = [`${count} card${count === 1 ? "" : "s"}`, `${sets.size} set${sets.size === 1 ? "" : "s"}`];
-  if (euros) bits.push(`plus ${eur(euros)} on Cardmarket`);
   if (count && priced < count) bits.push(`${count - priced} unpriced`);
   $("#totalMeta").textContent = bits.join(" · ");
 }
@@ -1292,9 +1437,9 @@ function renderFilters(cards) {
 }
 /* the cards the binder and gallery show, after search, filters and sort */
 function visibleRows() {
-  const q = norm(view.q);
+  const q = norm(view.q), qn = normName(view.q);
   const rows = Store.cards.filter(c => (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) &&
-    (!q || (norm(c.name) + " " + norm(c.setName) + " " + norm(c.setCode) + " " + norm(c.number)).includes(q)));
+    (!view.q.trim() || (q && (norm(c.name) + " " + norm(c.nameEn) + " " + norm(c.setName) + " " + norm(c.setCode) + " " + norm(c.number)).includes(q)) || (qn && (normName(c.name) + normName(c.setName)).includes(qn))));
   return rows.sort(SORTS[view.sort] || SORTS.value);
 }
 /* sort presets, plus "manual": the order you arranged by hand (cards added since then come first, newest first) */
@@ -1321,7 +1466,7 @@ async function saveManualOrder(visibleIds) {
   if (changed.length) await Store.putMany(changed); else renderList();
 }
 async function renderList() {
-  const cards = Store.cards; syncForeign();
+  const cards = Store.cards;
   renderTotals(cards); renderFilters(cards);
   const has = cards.length > 0; const tab = view.tab;
   if (tab === "decks") { view.arranging = false; $("#gtools").hidden = true; $("#filters").hidden = true; $("#empty").hidden = true; $("#fab").hidden = true; $("#list").hidden = true; $("#gallery").hidden = true; $("#decks").hidden = false; return renderDecks(); }
@@ -1342,14 +1487,14 @@ async function renderList() {
       <span class="main">
         <span class="name">${esc(c.name)}${(c.qty || 1) > 1 ? ` <span class="muted">×${c.qty}</span>` : ""}</span>
         <span class="setline">${esc(c.setName)} · <span class="mono">${esc(c.setCode || c.setId)} ${esc(c.number)}/${esc(c.printedTotal || "?")}</span></span>
-        <span class="chips">${c.lang ? `<span class="chip">${esc(langLabel(c.lang))}</span>` : ""}${c.rarity ? `<span class="chip t-${tier(c.rarity)}">${esc(c.rarity)}</span>` : ""}${g ? `<span class="chip grade">Est. ${esc(g)}</span>` : ""}</span>
+        <span class="chips">${c.rarity ? `<span class="chip t-${tier(c.rarity)}">${esc(c.rarity)}</span>` : ""}${g ? `<span class="chip grade">Est. ${esc(g)}</span>` : ""}</span>
       </span>
-      <span class="price">${p ? `<b>${usd(p.value)}</b><span>${p.finish && c.price && c.price.own ? "Your price" : esc(finishLabel(p.finish))}</span>` : eurOnly(c) != null ? `<b>${eur(eurOnly(c))}</b><span>Cardmarket</span>` : `<b class="muted">—</b><span>No price</span>`}</span>
+      <span class="price">${p ? `<b>${usd(p.value)}</b><span>${esc(finishLabel(p.finish))}</span>` : `<b class="muted">—</b><span>No price</span>`}</span>
     </button></li>`;
   }).join("");
   for (const c of rows) {
     const el = list.querySelector(`[data-photo="${CSS.escape(c.id)}"]`); if (!el) continue;
-    if (both) { const cat = Cat.byId.get(c.cardId); el.innerHTML = duoThumb(await photoFor(c), cat ? cardImage(cat) : "", "No photo"); }
+    if (both) el.innerHTML = duoThumb(await photoFor(c), recImage(c), "No photo");
     else el.innerHTML = picTag(await cardPicture(c, false), c.name);
   }
 }
@@ -1359,7 +1504,8 @@ const STALE = 6 * 3600 * 1000;
 async function refreshPrices(force, only) {
   if (PriceState.busy) return; PriceState.busy = true;
   try {
-    const due = (only || Store.cards).filter(c => c.cardId && !c.manual && (!c.lang || c.tcgdexId) && (force || !c.price || !c.price.fetchedAt || c.price.v !== 2 || Date.now() - c.price.fetchedAt > STALE));
+    if ((only || Store.cards).some(c => c.lang)) { if (await loadFX().catch(() => false)) Store.emit(); }
+    const due = (only || Store.cards).filter(c => c.cardId && c.lang !== "zh-cn" && (force || !c.price || !c.price.fetchedAt || c.price.v !== 2 || Date.now() - c.price.fetchedAt > STALE));
     if (!due.length) return;
     const { prices, reached } = await fetchPrices(due);
     PriceState.tried = true;
@@ -1373,7 +1519,7 @@ async function refreshPrices(force, only) {
     PriceState.blocked = false; Notices.hide("prices");
     for (const c of due) {
       const p = prices.get(c.cardId);
-      if (p) { const { rarity, ...price } = p; await Store.put({ ...c, price, ...(rarity && !c.rarity ? { rarity } : {}) }); }
+      if (p) { const { rarity, ...price } = p; await Store.put({ ...c, price, rarity: c.rarity || rarity || "" }); }
     }
   } finally { PriceState.busy = false; }
 }
@@ -1436,6 +1582,7 @@ async function binderRead(pg) {
   let w;
   try { w = await ocrWorker(t => { if (run === binder.run) binderHint(t); }); }
   catch (e) { if (run !== binder.run) return; pg.state = "done"; pg.cells.forEach(c => c.status = "done"); binderHint("The text reader couldn't load, so the pockets can't be read. Search for each card below."); renderBinderList(); return; }
+  if (scanLang() !== "en") { try { await loadAsia(scanLang(), t => { if (run === binder.run) binderHint(t); }); } catch (e) { if (run !== binder.run) return; binderHint(`The ${langName(scanLang())} card list couldn't load, so the pockets can't be matched. Check your connection and try again.`); } }
   const rec = async (cvs) => { try { return ((await w.recognize(cvs)).data.text) || ""; } catch (e) { return ""; } };
   for (let i = 0; i < pg.cells.length; i++) {
     if (run !== binder.run) return;
@@ -1589,81 +1736,12 @@ async function binderAddPage(btn) {
   }
 }
 
-function resetAdd() { Object.assign(add, { manualName: null, manualNum: null, blob: null, photoBlob: null, url: "", read: null, ocr: null, cands: [], chosen: null, finish: "normal", qty: 1, cond: null, step: "pick", prevStep: "review", err: "", status: "", searchQ: "", showSearch: false, cenBox: null }); }
+function resetAdd() { Object.assign(add, { blob: null, photoBlob: null, url: "", read: null, ocr: null, cands: [], chosen: null, finish: "normal", qty: 1, cond: null, step: "pick", prevStep: "review", err: "", status: "", searchQ: "", showSearch: false, cenBox: null }); }
 resetAdd();
 const CONDS = [["", "Not set"], ["9", "Near Mint, looks perfect (about 9)"], ["8", "Near Mint, tiny flaw (about 8)"], ["6", "Lightly played (about 6)"], ["4", "Moderately played (about 4)"], ["2", "Heavily played or damaged (about 2)"]];
 const condOptions = g => CONDS.map(([v, l]) => `<option value="${v}" ${String(g ?? "") === v ? "selected" : ""}>${l}</option>`).join("");
-function openAdd() {
-  stopScan(); binderClear(); Object.assign(Scan, { skipKey: "", added: 0, lastName: "" }); resetAdd(); renderAdd(); $("#addSheet").showModal();
-  if (isForeignLang()) {
-    loadForeignList().then(langRedraw);
-    if (LangPrefs.set && !foreignReady() && !Foreign.busy) { Foreign.busy = true; renderAdd(); loadForeignSet(LangPrefs.set).then(langRedraw); }
-  }
-}
+function openAdd() { stopScan(); binderClear(); Object.assign(Scan, { skipKey: "", added: 0, lastName: "" }); resetAdd(); renderAdd(); $("#addSheet").showModal(); }
 $("#addSheet").addEventListener("close", () => { stopScan(); binderClear(); });
-/* card language and set, at the top of Add card */
-function langPicker() {
-  const lang = LangPrefs.lang;
-  let note = "";
-  if (isForeignLang()) {
-    if (Foreign.busy) note = `<span class="spinner" aria-hidden="true"></span> Loading the set…`;
-    else if (foreignReady()) note = `<b>${esc(Foreign.set.name)}</b> (${esc(Foreign.set.code)}), ${Foreign.cards.length} cards. Matches use the Japanese numbering, which ${lang === "ja" ? "this print uses" : `${esc(langLabel(lang))} prints share`}. Prices are the Japanese print's on Cardmarket, in euros.`;
-    else if (Foreign.err) note = `<span class="err">${esc(Foreign.err)}</span>`;
-    else note = "Type the set code printed at the bottom left of the card, like SV8a, then press Load.";
-  } else if (isManualLang()) note = `No free catalogue lists ${esc(langLabel(lang))} cards, so you type the name, number and set yourself. Your photo is still saved, and you can set your own price.`;
-  const opts = (Foreign.list || []).slice(-400).map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("");
-  return `<div class="grid2">
-      <div class="field"><label for="langSel">Card language</label><select id="langSel">${LANGS.map(([k, l]) => `<option value="${k}" ${k === lang ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-      ${isForeignLang() ? `<div class="field"><label for="setCodeIn">Set code</label><div class="setrow"><input id="setCodeIn" list="jaSets" autocomplete="off" placeholder="e.g. SV8a" value="${esc(foreignReady() ? Foreign.set.code : LangPrefs.set || "")}"><button class="btn small" type="button" id="setLoad">Load</button></div><datalist id="jaSets">${opts}</datalist></div>` : ""}
-    </div>
-    ${note ? `<p class="src" style="margin:0" role="status">${note}</p>` : ""}`;
-}
-/* redraw the pick step when a load finishes, unless someone is typing a set code */
-const langRedraw = () => { if (add.step === "pick" && !(document.activeElement && document.activeElement.id === "setCodeIn")) renderAdd(); };
-function langPickerWire() {
-  const sel = $("#langSel"); if (!sel) return;
-  sel.addEventListener("change", async () => {
-    LangPrefs.lang = sel.value; saveLangPrefs(); add.cands = []; add.chosen = null;
-    const reload = isForeignLang() && LangPrefs.set && Foreign.lang !== LangPrefs.lang;
-    if (reload) Foreign.busy = true;
-    renderAdd();
-    if (isForeignLang()) loadForeignList().then(langRedraw);
-    if (reload) { await loadForeignSet(LangPrefs.set); langRedraw(); }
-  });
-  const go = async () => { const v = $("#setCodeIn").value.trim(); if (!v) return; LangPrefs.set = v; saveLangPrefs(); Foreign.busy = true; renderAdd(); await loadForeignSet(v); renderAdd(); };
-  const ld = $("#setLoad"); if (ld) ld.addEventListener("click", go);
-  const ci = $("#setCodeIn"); if (ci) ci.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); go(); } });
-}
-/* the form for a card typed in by hand */
-function manualForm() {
-  const read = add.read || {}, num = add.manualNum != null ? add.manualNum : (read.number || (add.ocr && add.ocr.number) || "");
-  return `<div class="grid2">
-      <div class="field"><label for="mName">Card name</label><input id="mName" autocomplete="off" placeholder="e.g. Pikachu ex" value="${esc(add.manualName != null ? add.manualName : read.name || "")}"></div>
-      <div class="field"><label for="mNum">Number</label><input id="mNum" autocomplete="off" placeholder="e.g. 012/105" value="${esc(num)}"></div>
-      <div class="field"><label for="mSet">Set name</label><input id="mSet" autocomplete="off" placeholder="e.g. Gemstone Vol.6" value="${esc(LangPrefs.mSet || read.setName || "")}"></div>
-      <div class="field"><label for="mCode">Set code</label><input id="mCode" autocomplete="off" placeholder="e.g. CBB6C" value="${esc(LangPrefs.mCode || read.setCode || "")}"></div>
-      <div class="field"><label for="mRar">Rarity (optional)</label><input id="mRar" autocomplete="off" placeholder="e.g. SR" value=""></div>
-      <div class="field"><label for="mPrice">Your price each, USD (optional)</label><input id="mPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 4.50"></div>
-      <div class="field"><label for="finSel">Finish</label><select id="finSel">${FINISHES.map(([k, l]) => `<option value="${k}" ${k === add.finish ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-      <div class="field"><label for="qtyIn">Copies</label><div class="qty"><button type="button" data-q="-1" aria-label="One fewer">−</button><input id="qtyIn" type="number" min="1" max="999" value="${add.qty}"><button type="button" data-q="1" aria-label="One more">+</button></div></div>
-    </div>
-    <p class="src" style="margin:0">The set name and code stay filled in for the next card, so a whole box goes quickly.</p>
-    <button class="btn primary" type="button" id="mSave">Add to collection</button>`;
-}
-function manualFormWire() {
-  const b = $("#addBody");
-  const fs = $("#finSel"); if (fs) fs.addEventListener("change", () => add.finish = fs.value);
-  const qi = $("#qtyIn"); if (qi) qi.addEventListener("change", () => add.qty = Math.max(1, Math.min(999, parseInt(qi.value) || 1)));
-  b.querySelectorAll("[data-q]").forEach(el => el.addEventListener("click", () => { add.qty = Math.max(1, Math.min(999, add.qty + parseInt(el.dataset.q))); $("#qtyIn").value = add.qty; }));
-  $("#mSave").addEventListener("click", e => {
-    const v = id => $(id).value.trim();
-    const f = { name: v("#mName"), number: v("#mNum"), set: v("#mSet"), code: v("#mCode"), rarity: v("#mRar"), price: v("#mPrice") };
-    if (!f.name || !f.number) { add.manualName = f.name; add.manualNum = f.number; add.err = "Add the card's name and number."; renderAdd(); return; }
-    const tot = f.number.match(/\/\s*(\d+)/); f.number = f.number.replace(/\s*\/.*$/, ""); f.total = tot ? tot[1] : "";
-    LangPrefs.mSet = f.set; LangPrefs.mCode = f.code; saveLangPrefs();
-    add.err = ""; saveAdd(manualCard(f), e.currentTarget);
-  });
-}
 function renderAdd() {
   const b = $("#addBody");
   const aiOn = AI.sample && AI.images;
@@ -1680,6 +1758,7 @@ function renderAdd() {
       <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view. Tap to focus."></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div><span class="scan-focus" id="scanFocus" aria-hidden="true"></span></div>
       <div class="seg" role="group" aria-label="Scan mode"><button type="button" data-smode="auto" aria-pressed="${!scanShotMode()}">Continuous</button><button type="button" data-smode="shot" aria-pressed="${scanShotMode()}">Single shot</button></div>
       <p class="muted" id="scanHint" role="status" style="margin:0">${Scan.added ? esc(scanAddedMsg()) : "Starting the camera…"}</p>
+      <div class="field"><label for="langSel">Card language</label><select id="langSel">${LANGS.map(([k, l]) => `<option value="${k}" ${k === scanLang() ? "selected" : ""}>${l}</option>`).join("")}</select><p class="src" id="langNote" style="margin:4px 0 0"></p></div>
       <div class="scan-ctl">
         <label>Frame size <input type="range" id="scanSize" min="30" max="100" step="1" value="${Math.round(ScanPrefs.size)}"></label>
         <label id="scanZoomRow" hidden>Camera zoom <input type="range" id="scanZoom"></label>
@@ -1691,7 +1770,7 @@ function renderAdd() {
         <button class="btn" type="button" id="scanTorch" aria-pressed="${Scan.torch}">${Scan.torch ? "Flash on" : "Flash off"}</button>
         <button class="btn" type="button" id="scanBack">${Scan.added ? "Done" : "Back"}</button>
       </div>`;
-    placeFrame(); scanPointer($("#scanBox"));
+    placeFrame(); scanPointer($("#scanBox")); wireLang(b);
     $("#scanSize").addEventListener("input", e => { ScanPrefs.size = Number(e.target.value); placeFrame(); });
     $("#scanSize").addEventListener("change", saveScanPrefs);
     $("#scanReset").addEventListener("click", () => {
@@ -1721,12 +1800,11 @@ function renderAdd() {
     return;
   }
   if (add.step === "pick") {
-    const catOk = LangPrefs.lang === "en" || foreignReady();
-    const live = scanUsable() && !aiOn && catOk, binderOk = ocrUsable() && !aiOn && catOk;
+    const live = scanUsable() && !aiOn, binderOk = ocrUsable() && !aiOn;
     b.innerHTML = `
-      ${langPicker()}
       <p class="muted" style="margin:0">${aiOn ? "Photograph the front of the card, flat and filling most of the frame. Claude reads the name, number and set, then checks condition." : ocrUsable() ? "Photograph the front of the card, flat, straight on and filling most of the frame. The app reads the collector number at the bottom to find it." : "Add a photo of the front, then find the card by name or number."}</p>
       ${add.err ? `<p class="add-err" role="alert">${esc(add.err)}</p>` : ""}
+      <div class="field"><label for="langSel">Card language</label><select id="langSel">${LANGS.map(([k, l]) => `<option value="${k}" ${k === scanLang() ? "selected" : ""}>${l}</option>`).join("")}</select><p class="src" id="langNote" style="margin:4px 0 0"></p></div>
       <div class="pickers">
         ${live ? `<button class="picker wide" type="button" id="scanBtn">Scan with camera<small>Hold the card up and the number is read live</small></button>` : ""}
         <label class="picker">Take photo<small>Camera</small><input id="camIn" type="file" accept="image/*" capture="environment"></label>
@@ -1739,7 +1817,7 @@ function renderAdd() {
     if (live) $("#scanBtn").addEventListener("click", startScan);
     if (binderOk) $("#binIn").addEventListener("change", e => { if (e.target.files && e.target.files.length) binderStart(e.target.files); });
     $("#skipPhoto").addEventListener("click", () => { add.step = "search"; renderAdd(); });
-    langPickerWire();
+    wireLang(b);
     return;
   }
   const shot = add.url ? `<img src="${esc(add.url)}" alt="Your photo">` : `<div class="ph">No photo</div>`;
@@ -1750,31 +1828,25 @@ function renderAdd() {
     statusHtml = `<span class="line"><b>${esc(r.name || "Unreadable")}</b> <span class="mono">${esc(r.number || "")}</span></span>
       <span class="read">Read from your photo${r.setCode ? ` · code <span class="mono">${esc(r.setCode)}</span>` : ""}${r.setName ? ` · ${esc(r.setName)}` : ""}${r.confidence ? ` · ${esc(r.confidence)} confidence` : ""}</span>`;
     if (r.isPokemonCard === false) statusHtml += `<span class="err">This doesn't look like a Pokémon card.</span>`;
-    else if (r.language && !/english/i.test(r.language) && LangPrefs.lang === "en") statusHtml += `<span class="err">This looks like a ${esc(r.language)} card. To log it in its own language, go back and set Card language first.</span>`;
+    else if (r.language && !/english/i.test(r.language)) statusHtml += `<span class="err">This looks like a ${esc(r.language)} card. The catalogue lists English cards, so pick the closest English printing.</span>`;
   } else if (add.ocr) {
     statusHtml = add.ocr.number
-      ? `<span class="line">Read <span class="mono">${esc(add.ocr.number)}</span> ${add.ocr.live ? "with the camera" : "from your photo"}</span><span class="read">${add.cands.length ? "Check it's the right card." : isManualLang() ? "Check the number below and fill in the rest." : "No card has that number. Search below."}</span>${add.ocr.live ? `<span><button class="btn small" type="button" id="rescanBtn">Scan again</button></span>` : ""}`
-      : `<span class="line">Couldn't read the number</span><span class="read">${add.cands.length ? "These names showed up in the photo." : isManualLang() ? "Type the card's details below." : "Search below, or try a sharper, closer photo."}</span>${add.ocr.live ? `<span><button class="btn small" type="button" id="rescanBtn">Scan again</button></span>` : ""}`;
+      ? `<span class="line">Read <span class="mono">${esc(add.ocr.number)}</span> ${add.ocr.live ? "with the camera" : "from your photo"}</span><span class="read">${add.cands.length ? "Check it's the right card." : "No card has that number. Search below."}</span>${add.ocr.live ? `<span><button class="btn small" type="button" id="rescanBtn">Scan again</button></span>` : ""}`
+      : `<span class="line">Couldn't read the number</span><span class="read">${add.cands.length ? "These names showed up in the photo." : "Search below, or try a sharper, closer photo."}</span>${add.ocr.live ? `<span><button class="btn small" type="button" id="rescanBtn">Scan again</button></span>` : ""}`;
   } else if (add.photoBlob) statusHtml = `<span class="line">Photo added</span><span class="read">${aiOn ? "" : "Find the card below."}</span>`;
   if (add.err) statusHtml += `<span class="err">${esc(add.err)}</span>`;
 
   const candList = add.cands.length ? `<div><p class="section-label">${add.read || (add.ocr && !add.searchQ) ? "Best matches" : "Results"}</p><ul class="cands">${add.cands.map(c => `
       <li class="cand-row"><button class="cand" type="button" data-cand="${esc(c.id)}" aria-pressed="${add.chosen && add.chosen.id === c.id}">
         <span class="thumb">${imgTag(cardImage(c), c.name)}</span>
-        <span class="t"><b>${esc(c.name)}</b><span>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.rarity || "No rarity listed")}</span></span>
+        <span class="t"><b>${esc(c.name)}</b><span>${esc(c.set.name)} · <span class="mono">${esc(c.set.code || c.set.id)} ${esc(c.number)}/${esc(c.set.total ?? "?")}</span> · ${esc(c.lang ? [langName(c.lang), c.rarity, asiaNote(c)].filter(Boolean).join(" · ") : c.rarity || "No rarity listed")}</span></span>
         <span class="tick" aria-hidden="true"></span></button>
         <button class="btn ${add.chosen && add.chosen.id === c.id ? "primary " : ""}cand-add" type="button" data-addcand="${esc(c.id)}" aria-label="Add ${esc(c.name)}, ${esc(c.set.name)} ${esc(c.number)}">Add</button></li>`).join("")}</ul>
       <p class="src" style="margin:6px 0 0">Add saves it now. To set finish, copies or condition first, pick the card and use the options below.</p></div>` : (add.read && add.step !== "reading" ? `<p class="muted" style="margin:0">No catalogue match for that reading. Search below.</p>` : "");
 
-  if (isManualLang() && add.step !== "reading") {
-    b.innerHTML = `<div class="shot">${shot}<div class="status" aria-live="polite">${statusHtml}</div></div>${manualForm()}`;
-    manualFormWire();
-    return;
-  }
   const showSearch = add.step === "search" || (add.step === "review" && ((!add.read && !add.ocr) || !add.cands.length || add.showSearch));
   const searchHtml = add.step === "reading" ? "" : (showSearch
-    ? (foreignReady() ? `<div class="field"><label for="catQ">Find the card in ${esc(Foreign.set.code)} (${esc(langLabel(LangPrefs.lang))})</label><input id="catQ" type="search" placeholder="e.g. 205 or Vaporeon" value="${esc(add.searchQ)}" autocomplete="off"></div>`
-      : `<div class="field"><label for="catQ">Find the card</label><input id="catQ" type="search" placeholder="e.g. Charizard 4/102 or Pikachu Surging Sparks" value="${esc(add.searchQ)}" autocomplete="off"></div>`)
+    ? `<div class="field"><label for="catQ">Find the card</label><input id="catQ" type="search" placeholder="e.g. Charizard 4/102 or Pikachu Surging Sparks" value="${esc(add.searchQ)}" autocomplete="off"></div>`
     : `<div><button class="linkbtn" type="button" id="showSearch">Not right? Search the catalogue</button></div>`);
 
   let condHtml = "";
@@ -1807,6 +1879,27 @@ function renderAdd() {
   const cb = $("#cenBtn"); if (cb) cb.addEventListener("click", () => { add.prevStep = add.step; add.step = "centering"; renderAdd(); });
   const sv = $("#saveCard"); if (sv) sv.addEventListener("click", () => saveAdd(add.chosen, sv));
   const rs = $("#rescanBtn"); if (rs) rs.addEventListener("click", () => { if (add.url) URL.revokeObjectURL(add.url); resetAdd(); startScan(); });
+}
+function langReady(L) {
+  return {
+    ja: "Japanese cards from TCGdex. Prices are Cardmarket's, in euros, counted in dollars at today's rate.",
+    ko: "Korean cards share set codes and numbers with the Japanese ones. Most Korean names aren't in the free list yet, so many show the Japanese name. Prices shown are the Japanese printing's, for reference only.",
+    "zh-tw": "Traditional Chinese cards from TCGdex. Sets it hasn't listed yet show the Japanese name. Prices shown are the Japanese printing's, for reference only.",
+    "zh-cn": "Simplified Chinese cards from a free weekly list. Pictures are the English printing's. No free source has prices for these."
+  }[L] || "";
+}
+function wireLang(b) {
+  const sel = b.querySelector("#langSel"); if (!sel) return;
+  sel.addEventListener("change", () => { ScanPrefs.lang = sel.value; saveScanPrefs(); add.cands = []; add.chosen = null; if (add.step === "scan") startScan(); else prepLang(); });
+  prepLang();
+}
+async function prepLang() {
+  const L = scanLang(), say = t => { const n = $("#langNote"); if (n) n.textContent = t; };
+  if (L === "en") { say(""); return true; }
+  if (Asia.data[L]) { say(langReady(L)); return true; }
+  say(`Loading the ${langName(L)} card list…`);
+  try { await loadAsia(L, say); say(langReady(L)); return true; }
+  catch (e) { say(`The ${langName(L)} card list couldn't load. Check your connection, then pick the language again.`); return false; }
 }
 function renderCands() {
   /* re-render only the results part while typing, keeping focus in the search box */
@@ -1848,6 +1941,7 @@ async function takePhoto(file) {
     add.step = "reading"; add.status = "Reading the card number…"; renderAdd();
     try {
       const text = await readByOCR(add.blob, s => { add.status = s; if (add.step === "reading") renderAdd(); });
+      if (scanLang() !== "en") await loadAsia(scanLang(), s => { add.status = s; if (add.step === "reading") renderAdd(); });
       const r = matchOCR(text);
       add.ocr = { number: r.number }; add.cands = r.cands; add.chosen = r.cands[0] || null;
       if (r.number && !r.cands.length) add.searchQ = r.number;
@@ -1863,12 +1957,11 @@ async function saveAdd(c, btn) {
   if (!c || add.saving) return;
   add.saving = true; add.chosen = c;
   const label = btn.textContent;
-  $("#addBody").querySelectorAll("#saveCard,[data-addcand],#mSave").forEach(x => x.disabled = true);
+  $("#addBody").querySelectorAll("#saveCard,[data-addcand]").forEach(x => x.disabled = true);
   btn.textContent = "Saving…";
   try {
     const photo = add.photoBlob ? await Store.savePhoto(add.photoBlob) : null;
-    const rec = { id: "card_" + uid(), ...cardFromCatalogue(c), finish: add.finish, qty: add.qty, condition: add.cond || null, photo, read: add.read ? { name: add.read.name || "", number: add.read.number || "", setCode: add.read.setCode || "", confidence: add.read.confidence || "" } : null, addedAt: Date.now(), price: c.manual ? ownPrice(c.ownPrice, add.finish) : null };
-    if (c.lang) Cat.byId.set(c.id, c);
+    const rec = { id: "card_" + uid(), ...cardFromCatalogue(c), finish: add.finish, qty: add.qty, condition: add.cond || null, photo, read: add.read ? { name: add.read.name || "", number: add.read.number || "", setCode: add.read.setCode || "", confidence: add.read.confidence || "" } : null, addedAt: Date.now(), price: null };
     await Store.put(rec);
     add.saving = false;
     priceNew([rec]);
@@ -1970,8 +2063,7 @@ async function renderDetail() {
   const c = Store.cards.find(x => x.id === detailId); const b = $("#detailBody");
   if (!c) { $("#detailSheet").open && $("#detailSheet").close(); return; }
   $("#detailTitle").textContent = c.name;
-  syncForeign();
-  const photo = await Store.photoURL(c); const cat = Cat.byId.get(c.cardId);
+  const photo = await Store.photoURL(c); const catSrc = recImage(c, true);
   if (detailCentering && photo) {
     centeringEditor(b, photo, c.condition && c.condition.centeringBox, async res => {
       detailCentering = false;
@@ -1987,27 +2079,25 @@ async function renderDetail() {
   if (usdRows) priceHtml = `<div class="tbl-wrap"><table><thead><tr><th>TCGplayer</th><th>Market</th><th>Low</th><th>Mid</th><th>High</th></tr></thead><tbody>${usdRows}</tbody></table></div>${eurRow}
       <p class="src" style="margin:8px 0 0">From ${esc(p.source)}${p.updated ? `, prices dated ${esc(String(p.updated).slice(0, 10))}` : ""}. Checked ${esc(ago(p.fetchedAt))}.</p>`;
   else if (p && p.eur) priceHtml = eurRow + `<p class="src">From ${esc(p.source)}. Checked ${esc(ago(p.fetchedAt))}.</p>`;
-  if (c.manual) priceHtml = `<div class="field"><label for="dOwn">Your price each (USD)</label><input id="dOwn" type="number" min="0" step="0.01" inputmode="decimal" value="${p && p.own && mine ? mine.value : ""}" placeholder="e.g. 4.50"></div>
-      <p class="src" style="margin:0">No free source prices ${esc(langLabel(c.lang))} cards, so this is the value you set. Sold listings on eBay are a good guide.</p>`;
-  else if (c.lang && c.lang !== "ja") priceHtml += `<p class="src" style="margin:8px 0 0">This is the price of the Japanese print. ${esc(langLabel(c.lang))} copies often sell for less.</p>`;
-  else priceHtml = `<p class="muted" style="margin:0">${PriceState.blocked && inClaude ? "Live prices load on the hosted copy of this app. Inside Claude, pages can't reach the price services." : PriceState.tried ? "No price listed for this card yet." : "Checking prices…"}</p>`;
-  const searchName = `${c.name} ${c.number}/${c.printedTotal || ""} ${c.setName}`;
+  else priceHtml = c.lang === "zh-cn" ? `<p class="muted" style="margin:0">No free price source covers Simplified Chinese cards.${c.nameEn ? ` The English printing is ${esc(c.nameEn)}; the TCGplayer link below searches for it.` : ""}</p>`
+    : `<p class="muted" style="margin:0">${PriceState.blocked && inClaude ? "Live prices load on the hosted copy of this app. Inside Claude, pages can't reach the price services." : PriceState.tried ? "No price listed for this card yet." : "Checking prices…"}</p>`;
+  if (p && p.ref && priceHtml) priceHtml += `<p class="src" style="margin:8px 0 0">This is Cardmarket's price for ${esc(p.ref)} of this card. No free source prices ${esc(langName(c.lang))} cards, so it isn't counted in your total.</p>`;
+  const searchName = c.lang ? `${c.nameEn || c.name} ${c.setCode} ${c.number} ${langName(c.lang).replace(/ \(.*\)/, "")}` : `${c.name} ${c.number}/${c.printedTotal || ""} ${c.setName}`;
   const ebay = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(searchName + " PSA")}&LH_Sold=1&LH_Complete=1`;
-  const tcgp = (p && p.url) || `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(c.name + " " + c.number)}`;
+  const tcgp = (p && p.url) || `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(c.lang ? (c.nameEn ? c.nameEn : c.setCode + " " + c.number) : c.name + " " + c.number)}`;
 
   b.innerHTML = `
     <div class="detail-hero">${(() => {
       const mineFig = `<figure>${photo ? `<img src="${esc(photo)}" alt="Your photo of ${esc(c.name)}">` : `<div class="ph">No photo</div>`}<figcaption>Your photo</figcaption></figure>`;
-      const catFig = `<figure>${cat ? `<img src="${esc(cardImage(cat, true))}" alt="Catalogue image of ${esc(c.name)}" data-fail="ph">` : `<div class="ph">No catalogue image</div>`}<figcaption>Catalogue</figcaption></figure>`;
+      const catFig = `<figure>${catSrc ? `<img src="${esc(catSrc)}" alt="Catalogue image of ${esc(c.name)}" data-fail="ph">` : `<div class="ph">No catalogue image</div>`}<figcaption>${c.lang === "zh-cn" && catSrc ? "English printing" : "Catalogue"}</figcaption></figure>`;
       return Prefs.pics === "catalogue" ? catFig + mineFig : mineFig + catFig;
     })()}
     </div>
     <div class="facts">
-      <div class="fact"><div class="k">Set</div><div class="v">${esc(c.setName)}</div><div class="muted" style="font-size:12px">${esc(c.series || "")} · ${esc(String(c.released || "").slice(0, 4))}</div></div>
+      <div class="fact"><div class="k">Set</div><div class="v">${esc(c.setName)}</div><div class="muted" style="font-size:12px">${esc(c.series || "")}${c.released ? " · " + esc(String(c.released).slice(0, 4)) : ""}${c.lang && asiaNote(c) ? " · " + esc(asiaNote(c)) : ""}</div></div>
       <div class="fact"><div class="k">Number</div><div class="v mono">${esc(c.setCode || c.setId)} ${esc(c.number)}/${esc(c.printedTotal || "?")}</div><div class="muted" style="font-size:12px">ID ${esc(c.cardId)}</div></div>
       <div class="fact"><div class="k">Rarity</div><div class="v">${c.rarity ? `<span class="chip t-${tier(c.rarity)}">${esc(c.rarity)}</span>` : "Not listed"}</div></div>
-      <div class="fact"><div class="k">Value each</div><div class="v num">${mine ? usd(mine.value) : eurOnly(c) != null ? eur(eurOnly(c)) : "—"}</div><div class="muted" style="font-size:12px">${mine ? (p.own ? "Your price" : "TCGplayer market, " + esc(finishLabel(mine.finish))) : eurOnly(c) != null ? "Cardmarket trend" : "No price yet"}</div></div>
-      ${c.lang ? `<div class="fact"><div class="k">Language</div><div class="v">${esc(langLabel(c.lang))}</div>${c.nameLocal && c.nameLocal !== c.name ? `<div class="muted" style="font-size:12px">${esc(c.nameLocal)}</div>` : ""}</div>` : ""}
+      <div class="fact"><div class="k">Value each</div><div class="v num">${mine ? usd(mine.value) : "—"}</div><div class="muted" style="font-size:12px">${mine ? (mine.eur ? `Cardmarket ${esc(eur(mine.eur))}, at today's rate` : "TCGplayer market, " + esc(finishLabel(mine.finish))) : p && p.ref ? "Not counted (another printing's price)" : "No price yet"}</div></div>
     </div>
     <div class="grid2">
       <div class="field"><label for="dFin">Finish</label><select id="dFin">${FINISHES.map(([k, l]) => `<option value="${k}" ${k === c.finish ? "selected" : ""}>${l}</option>`).join("")}</select></div>
@@ -2018,7 +2108,7 @@ async function renderDetail() {
     ${photo ? `<div><button class="btn small" type="button" id="dCen">${c.condition && c.condition.centeringMeasured ? "Measure centering again" : "Measure centering"}</button></div>` : ""}
     <div><p class="section-label">Prices</p>${priceHtml}</div>
     <div class="actions">
-      ${c.manual ? "" : `<button class="btn small" type="button" id="dRefresh">Refresh price</button>`}
+      <button class="btn small" type="button" id="dRefresh">Refresh price</button>
       <a class="btn small ghost" href="${esc(tcgp)}" target="_blank" rel="noopener">TCGplayer</a>
       <a class="btn small ghost" href="${esc(ebay)}" target="_blank" rel="noopener">Graded sold listings</a>
     </div>
@@ -2029,8 +2119,7 @@ async function renderDetail() {
   $("#dQty").addEventListener("change", e => Store.put({ ...c, qty: Math.max(1, Math.min(999, parseInt(e.target.value) || 1)) }).then(renderDetail));
   const dc = $("#dCond"); if (dc) dc.addEventListener("change", e => Store.put({ ...c, condition: { ...(c.condition || {}), source: "manual", grade: e.target.value ? Number(e.target.value) : null } }).then(renderDetail));
   const dcen = $("#dCen"); if (dcen) dcen.addEventListener("click", () => { detailCentering = true; renderDetail(); });
-  const own = $("#dOwn"); if (own) own.addEventListener("change", e => { const v = Number(e.target.value); Store.put({ ...c, price: ownPrice(v > 0 ? Math.round(v * 100) / 100 : 0, c.finish) }).then(renderDetail); });
-  const dr = $("#dRefresh"); if (dr) dr.addEventListener("click", async e => { e.target.disabled = true; e.target.textContent = "Checking…"; await refreshPrices(true, [c]).catch(() => {}); renderDetail(); });
+  $("#dRefresh").addEventListener("click", async e => { e.target.disabled = true; e.target.textContent = "Checking…"; await refreshPrices(true, [c]).catch(() => {}); renderDetail(); });
   const del = $("#dDel"); if (del) del.addEventListener("click", () => { confirmDelete = true; renderDetail(); });
   const yes = $("#dDelYes"); if (yes) yes.addEventListener("click", async () => { const name = c.name; await Store.remove(c); photoCache.delete(c.id); $("#detailSheet").close(); toast(`Removed ${name}`); });
   const no = $("#dDelNo"); if (no) no.addEventListener("click", () => { confirmDelete = false; renderDetail(); });
@@ -2046,9 +2135,8 @@ async function photoFor(c) {
 }
 async function warmPhotos() { await Promise.all(Store.cards.filter(c => c.photo && !photoCache.has(c.id)).map(c => photoFor(c).catch(() => ""))); }
 async function cardPicture(c, large) {
-  const cat = Cat.byId.get(c.cardId);
   const photo = await photoFor(c);
-  const catalogue = cat ? cardImage(cat, large) : "";
+  const catalogue = recImage(c, large);
   if (Prefs.pics === "catalogue") return { src: catalogue || photo, alt: catalogue ? photo : "" };
   return { src: photo || catalogue, alt: "" };
 }
@@ -2083,7 +2171,7 @@ async function renderGallery(rows) {
   const seen = new Set([...g.querySelectorAll(".gcard.in")].map(el => el.dataset.id));
   g.innerHTML = rows.map((c, i) => {
     const p = pickPrice(c); const g8 = c.condition && c.condition.grade; const q = c.qty || 1;
-    const label = `${c.name}, ${c.setName} ${c.number}${c.lang ? ", " + langLabel(c.lang) : ""}${p ? ", " + usd(p.value) : eurOnly(c) != null ? ", " + eur(eurOnly(c)) : ""}${c.rarity ? ", " + c.rarity : ""}`;
+    const label = `${c.name}, ${c.setName} ${c.number}${p ? ", " + usd(p.value) : ""}${c.rarity ? ", " + c.rarity : ""}`;
     const tag = arr ? "div" : "button"; const key = c.id + (both ? "1" : "");
     const moves = arr ? `<span class="gmove"><button type="button" data-mv="-1" aria-label="Move ${esc(c.name)} earlier"${i === 0 ? " disabled" : ""}>‹</button><button type="button" data-mv="1" aria-label="Move ${esc(c.name)} later"${i === rows.length - 1 ? " disabled" : ""}>›</button></span>` : "";
     return `<li class="gcard t-${tier(c.rarity)}" data-id="${esc(c.id)}" style="--i:${i % 8}">
@@ -2115,8 +2203,7 @@ async function renderGallery(rows) {
   for (const c of rows) {
     const el = g.querySelector(`[data-gimg="${CSS.escape(c.id)}"]`); if (!el) continue;
     if (both) {
-      const cat = Cat.byId.get(c.cardId);
-      const html = gside(await photoFor(c), "No photo yet") + gside(cat ? cardImage(cat, true) : "", c.name);
+      const html = gside(await photoFor(c), "No photo yet") + gside(recImage(c, true), c.name);
       if (el.innerHTML !== html) el.innerHTML = html;
     } else {
       const pic = await cardPicture(c, true);
@@ -2654,17 +2741,17 @@ function csvCell(v) {
   if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = "'" + s; // keep spreadsheets from reading a cell as a formula
   return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
-const CSV_COLS = ["Name", "Language", "Set", "Set code", "Number", "Set total", "Series", "Rarity", "Finish", "Copies", "Condition (your call)", "Estimated grade", "Centering", "Price each (USD)", "Value (USD)", "Price is for", "Price date", "Price source", "Catalogue ID", "Added"];
+const CSV_COLS = ["Name", "Set", "Set code", "Number", "Set total", "Series", "Rarity", "Finish", "Copies", "Condition (your call)", "Estimated grade", "Centering", "Price each (USD)", "Value (USD)", "Price is for", "Price date", "Price source", "Catalogue ID", "Added", "Language"];
 function collectionCSV(rows) {
   const out = [CSV_COLS.map(csvCell).join(",")];
   for (const c of rows) {
     const p = pickPrice(c), q = c.qty || 1, cond = c.condition || {}, g = cond.grade;
     const yours = cond.source === "manual" && g != null ? ((CONDS.find(x => x[0] === String(g)) || [])[1] || "") : "";
-    out.push([c.name, langLabel(c.lang || "en"), c.setName, c.setCode || "", c.number, c.printedTotal || "", c.series || "", c.rarity || "",
+    out.push([c.name, c.setName, c.setCode || "", c.number, c.printedTotal || "", c.series || "", c.rarity || "",
       c.finish ? finishLabel(c.finish) : "", q, yours, g == null ? "" : g, cond.centering || "",
       p ? p.value.toFixed(2) : "", p ? (p.value * q).toFixed(2) : "", p ? finishLabel(p.finish) : "",
       c.price && c.price.updated ? String(c.price.updated).slice(0, 10).replace(/\//g, "-") : "", c.price ? c.price.source || "" : "",
-      c.cardId || "", c.addedAt ? new Date(c.addedAt).toISOString().slice(0, 10) : ""].map(csvCell).join(","));
+      c.cardId || "", c.addedAt ? new Date(c.addedAt).toISOString().slice(0, 10) : "", langName(c.lang || "en")].map(csvCell).join(","));
   }
   return "﻿" + out.join("\r\n") + "\r\n";
 }
@@ -2702,9 +2789,8 @@ function loadImg(src, retry) {
   });
 }
 async function exportPictures(c, mode) {
-  const cat = Cat.byId.get(c.cardId);
   let photo = photoCache.get(c.id); if (photo === undefined) { photo = await Store.photoURL(c); photoCache.set(c.id, photo); }
-  const catalogue = cat ? cardImage(cat, true) : "";
+  const catalogue = recImage(c, true);
   if (mode === "both") return { mine: await loadImg(photo), cat: await loadImg(catalogue) };
   const first = mode === "mine" ? photo : catalogue, second = mode === "mine" ? catalogue : photo;
   const im = await loadImg(first); if (im) return { one: im };
@@ -2984,6 +3070,16 @@ Store.onChange(() => {
   if ($("#detailSheet").open) renderDetail();
 });
 
+window.__dbg = { loadAsia, matchAsia, searchAsia, Asia, Cat, ScanPrefs, cardFromCatalogue, recImage, priceFromAsia, loadFX, FX, pickPrice, enTwin,
+  async ocrUrl(url, lang) {
+    ScanPrefs.lang = lang;
+    const im = new Image(); im.crossOrigin = "anonymous"; await new Promise((res, rej) => { im.onload = res; im.onerror = rej; im.src = url; });
+    const cv = document.createElement("canvas"); cv.width = im.naturalWidth; cv.height = im.naturalHeight; cv.getContext("2d").drawImage(im, 0, 0);
+    const w = await ocrWorker(() => {}); await loadAsia(lang);
+    const t1 = (await w.recognize(scanStrip(cv, 0.85, 0.15, Math.min(3, Math.max(1.4, 1000 / cv.width))))).data.text;
+    const r = matchOCR(t1);
+    return { text: t1, number: r.number, cands: r.cands.slice(0, 4).map(c => c.id + " " + c.name + " " + c.set.name + " " + c.set.total) };
+  } };
 (async function boot() {
   $("#filters").hidden = true; $("#empty").hidden = false;
   const cat = loadCatalogue().catch(() => Notices.show("cat", "The card catalogue didn't load, so new cards can't be matched. Reopen the page to try again.", false));
