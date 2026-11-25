@@ -17,7 +17,7 @@ Live site: https://docgonzo420.github.io/PokeLab/
 
 ## Cards in other languages
 
-Pick **Card language** at the top of Add card (or on the camera screen). The app remembers it, so switch back to English when you're done. The first time you pick a language, its whole card list downloads and is kept in the browser, refreshed weekly. There's no set code to type: photos, camera scans, binder pages and search match across every set of that language.
+Pick **Card language** at the top of Add card (or on the camera screen). The app remembers it, so switch back to English when you're done. The first time you pick a language, its whole card list downloads and is kept in the browser, refreshed every few days. There's no set code to type: photos, camera scans, binder pages and search match across every set of that language.
 
 - **How these cards are read:** Japanese, Korean and Chinese cards print the set code and number small at the bottom left (like `sv8a 010/187`), so the scanner reads that corner larger, in two ways, and offers both results if they differ. A number whose total fits no set counts as a misread rather than a guess.
 - **Japanese:** every set on [TCGdex](https://tcgdex.dev) (about 13,000 cards), with pictures. Prices are Cardmarket's, in euros, counted in dollars at the European Central Bank rate from [Frankfurter](https://frankfurter.dev). TCGplayer doesn't price Japanese cards.
