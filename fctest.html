@@ -1,0 +1,81 @@
+<!doctype html><meta charset=utf8><meta name=viewport content="width=device-width"><title>fc test</title>
+<body style="font:13px monospace;background:#222;color:#eee"><pre id=out>running</pre><div id=pics></div>
+<script>
+function findCard(cv) {
+  const W = cv.width, H = cv.height, d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  const g = new Float32Array(W * H);
+  for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = d[j] * 0.299 + d[j + 1] * 0.587 + d[j + 2] * 0.114;
+  const CAP = 36, gx = new Float32Array(W * H), gy = new Float32Array(W * H);
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x;
+    gx[i] = Math.min(CAP, Math.abs(g[i + 1] - g[i - 1])) / CAP;
+    gy[i] = Math.min(CAP, Math.abs(g[i + W] - g[i - W])) / CAP;
+  }
+  /* allow a pixel of slack across each edge, then prefix sums along rows (top/bottom) and columns (sides) */
+  const row = new Float32Array(H * (W + 1)), col = new Float32Array(W * (H + 1));
+  for (let y = 1; y < H - 1; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, e = Math.max(gy[i], gy[i - W], gy[i + W]);
+    row[y * (W + 1) + x + 1] = row[y * (W + 1) + x] + e;
+  }
+  for (let x = 1; x < W - 1; x++) for (let y = 0; y < H; y++) {
+    const i = y * W + x, e = Math.max(gx[i], gx[i - 1], gx[i + 1]);
+    col[x * (H + 1) + y + 1] = col[x * (H + 1) + y] + e;
+  }
+  const hl = (y, x1, x2) => (row[y * (W + 1) + x2] - row[y * (W + 1) + x1]) / (x2 - x1);
+  const vl = (x, y1, y2) => (col[x * (H + 1) + y2] - col[x * (H + 1) + y1]) / (y2 - y1);
+  const rate = (x1, y1, w, h) => {
+    const x2 = x1 + w, y2 = y1 + h, m = 0.08;
+    /* skip the rounded corners */
+    const ix = Math.round(w * m), iy = Math.round(h * m);
+    const t = hl(y1, x1 + ix, x2 - ix), b = hl(y2, x1 + ix, x2 - ix), l = vl(x1, y1 + iy, y2 - iy), r = vl(x2, y1 + iy, y2 - iy);
+    const lo = Math.min(t, b, l, r);
+    return { s: (t + b + l + r) / 4 * 0.7 + lo * 0.3 + 0.06 * h / H, lo };
+  };
+  let best = null;
+  const tryBox = (x1, y1, w, h) => {
+    if (x1 < 1 || y1 < 1 || x1 + w > W - 2 || y1 + h > H - 2) return;
+    const r = rate(x1, y1, w, h); if (!best || r.s > best.s) best = { ...r, x: x1, y: y1, w, h };
+  };
+  for (let h = Math.round(H * 0.3); h <= H - 3; h += 2) for (const a of [0.94, 1, 1.06]) {
+    const w = Math.round(h * 63 / 88 * a); if (w > W - 3) continue;
+    for (let y = 1; y + h <= H - 2; y += 2) for (let x = 1; x + w <= W - 2; x += 2) tryBox(x, y, w, h);
+  }
+  if (!best) return null;
+  const c = best;
+  for (let dh = -2; dh <= 2; dh++) for (let dw = -2; dw <= 2; dw++) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) tryBox(c.x + dx, c.y + dy, c.w + dw, c.h + dh);
+  if (best.s < 0.42 || best.lo < 0.28) return null;
+  return { cx: (best.x + best.w / 2) / W * 100, cy: (best.y + best.h / 2) / H * 100, size: best.h / H * 100, score: best.s };
+}
+
+const cards=["ja/SV/SV8a/010","en/sv/sv03.5/006","ja/SV/SV2a/151","en/swsh/swsh12.5/GG01","zh-tw/SV/SV9/001"];
+const load=u=>new Promise((r,j)=>{const i=new Image();i.crossOrigin="anonymous";i.onload=()=>r(i);i.onerror=()=>r(null);i.src=u;});
+function bg(ctx,W,H,kind,seed){let x=seed;const rnd=()=>(x=(x*16807)%2147483647)/2147483647;
+ if(kind==0){ctx.fillStyle="#6b4f35";ctx.fillRect(0,0,W,H);for(let i=0;i<300;i++){ctx.strokeStyle=`rgba(${40+rnd()*60|0},${25+rnd()*30|0},10,.4)`;ctx.beginPath();const y=rnd()*H;ctx.moveTo(0,y);ctx.bezierCurveTo(W/3,y+rnd()*20-10,W*2/3,y+rnd()*20-10,W,y+rnd()*10);ctx.stroke();}}
+ else if(kind==1){ctx.fillStyle="#d8d8d4";ctx.fillRect(0,0,W,H);for(let i=0;i<4000;i++){ctx.fillStyle=`rgba(0,0,0,${rnd()*.08})`;ctx.fillRect(rnd()*W,rnd()*H,3,3);}}
+ else if(kind==2){ctx.fillStyle="#111";ctx.fillRect(0,0,W,H);ctx.fillStyle="#333";ctx.fillRect(W*.1,H*.05,W*.8,H*.9);}
+ else {ctx.fillStyle="#fff";ctx.fillRect(0,0,W,H);ctx.fillStyle="#ddd";for(let i=0;i<20;i++)ctx.fillRect(0,i*H/20,W,2);}}
+(async()=>{const out=$=document.getElementById("out");let lines=[],ok=0,n=0;
+for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.png`);if(!img){lines.push(c+" no image");continue;}
+ for(let t=0;t<8;t++){
+  const W=600,H=800,cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
+  bg(ctx,W,H,t%4,t*977+5);
+  const fill=[0.92,0.7,0.55,0.85,0.45,0.96,0.65,0.8][t];const h=H*fill,w=h*63/88;
+  const cx=W/2+[0,-60,80,20,-120,0,100,-30][t]*(1-fill)*3, cy=H/2+[0,40,-90,30,110,0,-60,70][t]*(1-fill)*3;
+  const rot=[0,1.5,-2,0.5,3,0,-1,2][t]*Math.PI/180;
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);
+  if(t%2){ctx.shadowColor="rgba(0,0,0,.5)";ctx.shadowBlur=12;}
+  ctx.drawImage(img,-w/2,-h/2,w,h);
+  if(t==3||t==6){ctx.fillStyle="rgba(255,255,255,.18)";ctx.fillRect(-w/2-3,-h/2-3,w+6,h+6);} /* sleeve */
+  ctx.restore();
+  if(t==5){ctx.filter="blur(2px)";const c2=document.createElement("canvas");c2.width=W;c2.height=H;c2.getContext("2d").filter="blur(3px)";c2.getContext("2d").drawImage(cv,0,0);ctx.drawImage(c2,0,0);}
+  const sm=document.createElement("canvas");sm.width=120;sm.height=160;sm.getContext("2d").drawImage(cv,0,0,120,160);
+  const t0=performance.now(),r=findCard(sm),ms=(performance.now()-t0).toFixed(1);
+  const want={cx:cx/W*100,cy:cy/H*100,size:fill*100};n++;
+  const good=r&&Math.abs(r.cx-want.cx)<3&&Math.abs(r.cy-want.cy)<3&&Math.abs(r.size-want.size)<5;if(good)ok++;
+  lines.push(`${c} t${t} ${good?"OK ":"BAD"} want ${want.cx.toFixed(1)},${want.cy.toFixed(1)},${want.size.toFixed(1)} got ${r?r.cx.toFixed(1)+","+r.cy.toFixed(1)+","+r.size.toFixed(1)+" s"+r.score.toFixed(2):"none"} ${ms}ms`);
+  if(!good){cv.style.width="150px";document.getElementById("pics").appendChild(cv);}
+ }}
+/* empty scenes should give none */
+for(let k=0;k<4;k++){const sm=document.createElement("canvas");sm.width=120;sm.height=160;bg(sm.getContext("2d"),120,160,k,k*31+7);const r=findCard(sm);lines.push(`empty bg${k}: ${r?"FALSE HIT "+r.score.toFixed(2):"none ok"}`);}
+out.textContent=`${ok}/${n} found\n`+lines.join("\n");document.title="done";})();
+</script>
