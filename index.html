@@ -3076,9 +3076,13 @@ window.__dbg = { loadAsia, matchAsia, searchAsia, Asia, Cat, ScanPrefs, cardFrom
     const im = new Image(); im.crossOrigin = "anonymous"; await new Promise((res, rej) => { im.onload = res; im.onerror = rej; im.src = url; });
     const cv = document.createElement("canvas"); cv.width = im.naturalWidth; cv.height = im.naturalHeight; cv.getContext("2d").drawImage(im, 0, 0);
     const w = await ocrWorker(() => {}); await loadAsia(lang);
-    const t1 = (await w.recognize(scanStrip(cv, 0.85, 0.15, Math.min(3, Math.max(1.4, 1000 / cv.width))))).data.text;
-    const r = matchOCR(t1);
-    return { text: t1, number: r.number, cands: r.cands.slice(0, 4).map(c => c.id + " " + c.name + " " + c.set.name + " " + c.set.total) };
+    const strip = (top, h, sc, l, wd) => { const sy = Math.round(cv.height * top), sh = Math.round(cv.height * h), sx = Math.round(cv.width * l), sw = Math.round(cv.width * wd);
+      const c2 = document.createElement("canvas"); c2.width = Math.round(sw * sc); c2.height = Math.round(sh * sc); const x = c2.getContext("2d"); x.filter = "grayscale(1) contrast(1.35)"; x.drawImage(cv, sx, sy, sw, sh, 0, 0, c2.width, c2.height); return c2; };
+    const out = {};
+    for (const [k, a] of Object.entries({ full: [0.85, 0.15, 1.67, 0, 1], left2: [0.9, 0.1, 2, 0, 0.5], left3: [0.9, 0.1, 3, 0, 0.5], left4: [0.92, 0.08, 4, 0, 0.45] })) {
+      const t = (await w.recognize(strip(...a))).data.text; const r = matchOCR(t); out[k] = [t.replace(/\s+/g, " ").slice(0, 80), r.number, r.cands.slice(0, 2).map(c => c.id)];
+    }
+    return out;
   } };
 (async function boot() {
   $("#filters").hidden = true; $("#empty").hidden = false;
@@ -3097,6 +3101,7 @@ if (location.hash.startsWith("#dbg")) setTimeout(async () => {
   const log = x => { pre.textContent += (typeof x === "string" ? x : JSON.stringify(x)) + "\n"; };
   const D = window.__dbg;
   const step = async (name, fn) => { const t = Date.now(); try { log(name + ": " + JSON.stringify(await fn()) + " (" + (Date.now() - t) + "ms)"); } catch (e) { log(name + " FAILED " + (e && e.message)); } };
+  if (!location.hash.includes("only")) {
   await step("ja", async () => { const a = await D.loadAsia("ja"); return [a.cards.length, a.sets.length]; });
   await step("ko", async () => { const a = await D.loadAsia("ko"); return [a.cards.length, a.cards.filter(c => !c.fromJa).length]; });
   await step("zh-tw", async () => { const a = await D.loadAsia("zh-tw"); return [a.cards.length, a.cards.filter(c => !c.fromJa).length]; });
@@ -3110,7 +3115,8 @@ if (location.hash.startsWith("#dbg")) setTimeout(async () => {
   await step("searchJa", async () => D.searchAsia("SV8a 200", "ja", 5).map(c => c.id + c.name));
   await step("fx", async () => [await D.loadFX(), D.FX.rate]);
   for (const id of ["ja:SV8a-010", "zh-tw:SV8a-010", "ko:SV4K-012", "ko:SV8a-010"]) await step("price " + id, async () => { const L = id.split(":")[0]; const c = D.Asia.data[L].cards.find(x => x.id === id); const r = D.cardFromCatalogue(c); const p = await D.priceFromAsia(r); return [p && p.eur, p && p.ref, p && p.rarity, D.pickPrice({ ...r, price: p })]; });
-  const urls = location.hash.slice(5).split(",").filter(Boolean);
+  }
+  const urls = location.hash.replace("only","").slice(5).split(",").filter(Boolean);
   for (const u of urls) { const [lang, ...rest] = u.split("|"); await step("ocr " + rest.join("|"), () => D.ocrUrl(rest.join("|"), lang)); }
   log("DONE");
 }, 2500);
