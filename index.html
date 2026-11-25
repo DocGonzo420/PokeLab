@@ -343,12 +343,11 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
 </style>
 
 <script>
-(()=>{const cv=document.createElement("canvas");cv.width=720;cv.height=1280;const ctx=cv.getContext("2d");
+(()=>{const cv=document.createElement("canvas");cv.width=960;cv.height=1280;const ctx=cv.getContext("2d");
 const img=new Image();img.crossOrigin="anonymous";img.src="https://assets.tcgdex.net/en/sv/sv03.5/006/high.png";
-const spots=[null,{cx:360,cy:640,h:900},{cx:300,cy:560,h:700},{cx:420,cy:760,h:1050}];window.__fake={i:0,spots};
-function draw(){const sp=spots[Math.floor(performance.now()/7000)%spots.length];window.__fake.cur=sp;
- ctx.fillStyle="#e4e2dc";ctx.fillRect(0,0,720,1280);ctx.fillStyle="#cfccc4";for(let i=0;i<30;i++)ctx.fillRect(0,i*43,720,3);
- ctx.fillStyle="#555";ctx.fillRect(40,1180,640,80);
+const spots=[null,{cx:480,cy:640,h:720},{cx:380,cy:600,h:520},{cx:560,cy:680,h:640}];window.__fake={spots,hold:null};
+function draw(){const sp=window.__fake.hold!=null?spots[window.__fake.hold]:spots[Math.floor(performance.now()/8000)%spots.length];window.__fake.cur=sp;
+ ctx.fillStyle="#e4e2dc";ctx.fillRect(0,0,960,1280);ctx.fillStyle="#cfccc4";for(let i=0;i<30;i++)ctx.fillRect(0,i*43,960,3);
  if(sp&&img.complete&&img.naturalWidth){const w=sp.h*63/88;ctx.save();ctx.translate(sp.cx,sp.cy);ctx.rotate(0.012);ctx.shadowColor="rgba(0,0,0,.35)";ctx.shadowBlur=14;ctx.drawImage(img,-w/2,-sp.h/2,w,sp.h);ctx.restore();}
  requestAnimationFrame(draw);}
 draw();const st=cv.captureStream(15);
@@ -1305,7 +1304,7 @@ function findCard(cv) {
     if (x1 < 1 || y1 < 1 || x1 + w > W - 2 || y1 + h > H - 2) return;
     const r = rate(x1, y1, w, h); if (!best || r.s > best.s) best = { ...r, x: x1, y: y1, w, h };
   };
-  for (let h = Math.round(H * 0.3); h <= H - 3; h += 2) for (const a of [0.94, 1, 1.06]) {
+  for (let h = Math.round(H * 0.42); h <= H - 3; h += 2) for (const a of [0.94, 1, 1.06]) {
     const w = Math.round(h * 63 / 88 * a); if (w > W - 3) continue;
     for (let y = 1; y + h <= H - 2; y += 2) for (let x = 1; x + w <= W - 2; x += 2) tryBox(x, y, w, h);
   }
