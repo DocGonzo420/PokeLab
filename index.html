@@ -147,6 +147,7 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .scan video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .scan-frame{position:absolute;left:50%;top:50%;height:86%;aspect-ratio:63/88;transform:translate(-50%,-50%);border:3px solid rgba(255,255,255,.92);border-radius:12px;box-shadow:0 0 0 999px rgba(0,0,0,.45);transition:border-color .2s;cursor:move}
 .scan-num{position:absolute;left:4%;right:4%;bottom:2%;height:12%;border:2px dashed #ffd36b;border-radius:6px}
+.scan.found .scan-frame{border-color:#ffd54a}
 .scan.seen .scan-frame{border-color:#8be0a4}
 .scan.seen .scan-num{border-color:#8be0a4;border-style:solid}
 .scan-focus{position:absolute;width:60px;height:60px;margin:-30px 0 0 -30px;border:2px solid #ffd36b;border-radius:50%;opacity:0;transform:scale(1.4);transition:opacity .25s,transform .25s;pointer-events:none}
@@ -1233,12 +1234,12 @@ function scanPointer(box) {
     pts.set(e.pointerId, local(e));
     if (mode === "pinch" && pts.size >= 2) {
       const [a, b] = [...pts.values()];
-      ScanPrefs.size = start.size * Math.hypot(a.x - b.x, a.y - b.y) / start.dist; placeFrame();
+      ScanPrefs.size = start.size * Math.hypot(a.x - b.x, a.y - b.y) / start.dist; placeFrame(); Scan.userMoved = Date.now();
     } else if (mode === "drag") {
       const p = local(e), dx = p.x - start.p.x, dy = p.y - start.p.y;
       if (!start.moved && Math.hypot(dx, dy) < 6) return;
       start.moved = true;
-      ScanPrefs.cx = start.cx + dx / box.clientWidth * 100; ScanPrefs.cy = start.cy + dy / box.clientHeight * 100; placeFrame();
+      ScanPrefs.cx = start.cx + dx / box.clientWidth * 100; ScanPrefs.cy = start.cy + dy / box.clientHeight * 100; placeFrame(); Scan.userMoved = Date.now();
     } else if (mode === "tap") {
       const p = local(e); if (Math.hypot(p.x - start.p.x, p.y - start.p.y) >= 6) start.moved = true;
     }
@@ -1248,13 +1249,109 @@ function scanPointer(box) {
     const p = pts.get(e.pointerId); pts.delete(e.pointerId);
     if (pts.size) return;
     if (start && !start.moved && mode !== "pinch") scanFocusAt(p.x, p.y);
-    if (start && start.moved) saveScanPrefs();
+    if (start && start.moved) { saveScanPrefs(); Scan.userMoved = Date.now(); }
     mode = ""; start = null;
   };
   box.addEventListener("pointerup", end); box.addEventListener("pointercancel", end);
 }
 const pause = ms => new Promise(r => setTimeout(r, ms));
 function scanUsable() { return ocrUsable() && window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+/* ---------- finding the card in the camera picture ----------
+   Looks for the four straight edges of a card-shaped (63 x 88) rectangle in a small copy of what the
+   frame box shows, using edge strength summed along each side, then moves the frame onto it. */
+function findCard(cv) {
+  const W = cv.width, H = cv.height, d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  /* colour edges, so a yellow border on a white stand still shows */
+  const CAP = 40, gx = new Float32Array(W * H), gy = new Float32Array(W * H), diff = (a, b) => Math.max(Math.abs(d[a] - d[b]), Math.abs(d[a + 1] - d[b + 1]), Math.abs(d[a + 2] - d[b + 2]));
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x, j = i * 4;
+    gx[i] = Math.min(CAP, diff(j + 4, j - 4)) / CAP;
+    gy[i] = Math.min(CAP, diff(j + W * 4, j - W * 4)) / CAP;
+  }
+  /* allow a pixel of slack across each edge, then prefix sums along rows (top/bottom) and columns (sides) */
+  const row = new Float32Array(H * (W + 1)), col = new Float32Array(W * (H + 1));
+  for (let y = 1; y < H - 1; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, e = Math.max(gy[i], gy[i - W], gy[i + W]);
+    row[y * (W + 1) + x + 1] = row[y * (W + 1) + x] + e;
+  }
+  for (let x = 1; x < W - 1; x++) for (let y = 0; y < H; y++) {
+    const i = y * W + x, e = Math.max(gx[i], gx[i - 1], gx[i + 1]);
+    col[x * (H + 1) + y + 1] = col[x * (H + 1) + y] + e;
+  }
+  const hl = (y, x1, x2) => (row[y * (W + 1) + x2] - row[y * (W + 1) + x1]) / (x2 - x1);
+  const vl = (x, y1, y2) => (col[x * (H + 1) + y2] - col[x * (H + 1) + y1]) / (y2 - y1);
+  const rate = (x1, y1, w, h) => {
+    const x2 = x1 + w, y2 = y1 + h, m = 0.08;
+    /* skip the rounded corners */
+    const ix = Math.round(w * m), iy = Math.round(h * m);
+    const t = hl(y1, x1 + ix, x2 - ix), b = hl(y2, x1 + ix, x2 - ix), l = vl(x1, y1 + iy, y2 - iy), r = vl(x2, y1 + iy, y2 - iy);
+    const lo = Math.min(t, b, l, r);
+    return { s: (t + b + l + r) / 4 * 0.7 + lo * 0.3 + 0.06 * h / H, lo };
+  };
+  let best = null;
+  const tryBox = (x1, y1, w, h) => {
+    if (x1 < 1 || y1 < 1 || x1 + w > W - 2 || y1 + h > H - 2) return;
+    const r = rate(x1, y1, w, h); if (!best || r.s > best.s) best = { ...r, x: x1, y: y1, w, h };
+  };
+  for (let h = Math.round(H * 0.42); h <= H - 3; h += 2) for (const a of [0.94, 1, 1.06]) {
+    const w = Math.round(h * 63 / 88 * a); if (w > W - 3) continue;
+    for (let y = 1; y + h <= H - 2; y += 2) for (let x = 1; x + w <= W - 2; x += 2) tryBox(x, y, w, h);
+  }
+  if (!best) return null;
+  const refine = () => { const c = best; for (let dh = -2; dh <= 2; dh++) for (let dw = -2; dw <= 2; dw++) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) tryBox(c.x + dx, c.y + dy, c.w + dw, c.h + dh); };
+  refine();
+  /* a card's inner border is a rectangle too: take the biggest strong rectangle around the best one */
+  /* (only a little bigger: a tray or stand around the card is a rectangle too) */
+  const inner = best, floor = inner.s * 0.94;
+  let outer = null;
+  for (let h = inner.h + 3; h <= Math.min(H - 3, inner.h * 1.16); h += 2) for (const a of [0.94, 1, 1.06]) {
+    const w = Math.round(h * 63 / 88 * a);
+    for (let y = Math.max(1, inner.y + inner.h - h); y <= inner.y; y += 2) for (let x = Math.max(1, inner.x + inner.w - w); x <= inner.x; x += 2) {
+      if (x + w > W - 2 || y + h > H - 2) continue;
+      const r = rate(x, y, w, h);
+      if (r.s >= floor && r.lo >= 0.3 && (!outer || h > outer.h || (h === outer.h && r.s > outer.s))) outer = { ...r, x, y, w, h };
+    }
+  }
+  if (outer) { best = outer; refine(); }
+  if (best.s < 0.6 || best.lo < 0.3) return null;
+  /* a card has print inside it; an empty tray or shadow does not */
+  let busy = 0, n = 0;
+  for (let y = best.y + Math.round(best.h * 0.1); y < best.y + best.h * 0.9; y += 2) for (let x = best.x + Math.round(best.w * 0.1); x < best.x + best.w * 0.9; x += 2) { const i = y * W + x; busy += Math.max(gx[i], gy[i]); n++; }
+  best.busy = busy / n;
+  if (best.busy < 0.06) return null;
+  return { cx: (best.x + best.w / 2) / W * 100, cy: (best.y + best.h / 2) / H * 100, size: best.h / H * 100, score: best.s, busy: best.busy };
+}
+/* what the frame box shows, small, for findCard */
+function boxSnapshot(video, box) {
+  const vw = video.videoWidth, vh = video.videoHeight, bw = box.clientWidth, bh = box.clientHeight;
+  if (!vw || !vh || !bw || !bh) return null;
+  const s = Math.max(bw / vw, bh / vh), sw = bw / s, sh = bh / s;
+  const cv = document.createElement("canvas"); cv.width = 120; cv.height = Math.round(120 * bh / bw);
+  cv.getContext("2d", { willReadFrequently: true }).drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, cv.width, cv.height);
+  return cv;
+}
+const autoFrameOn = () => ScanPrefs.auto !== false;
+async function autoFrameLoop(run) {
+  const video = $("#scanVideo"), box = $("#scanBox"); let prev = null, misses = 0;
+  while (run === Scan.run) {
+    await pause(220);
+    if (run !== Scan.run || !autoFrameOn() || document.hidden || video.readyState < 2) { prev = null; continue; }
+    if (Date.now() - (Scan.userMoved || 0) < 4000) { prev = null; continue; }
+    const cv = boxSnapshot(video, box); if (!cv) continue;
+    const hit = findCard(cv);
+    if (!hit) { if (++misses > 6) { box.classList.remove("found"); prev = null; } continue; }
+    misses = 0;
+    /* two looks in a row that agree, so a passing hand doesn't move the frame */
+    const same = prev && Math.abs(prev.cx - hit.cx) < 4 && Math.abs(prev.cy - hit.cy) < 4 && Math.abs(prev.size - hit.size) < 5;
+    prev = hit; if (!same) continue;
+    /* a hair inside the card's edge, so the number strip doesn't take in the table under the card */
+    const size = Math.min(100, hit.size * 0.98);
+    if (Math.abs(ScanPrefs.cx - hit.cx) > 1.2 || Math.abs(ScanPrefs.cy - hit.cy) > 1.2 || Math.abs(ScanPrefs.size - size) > 1.5) {
+      Object.assign(ScanPrefs, { cx: hit.cx, cy: hit.cy, size }); placeFrame();
+    }
+    box.classList.add("found");
+  }
+}
 function stopScan() {
   Scan.run++;
   if (Scan.stream) Scan.stream.getTracks().forEach(t => t.stop());
@@ -1308,7 +1405,7 @@ async function startScan() {
       if (ScanPrefs.focus == null && caps.focusMode && caps.focusMode.includes("continuous")) Scan.track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
     } catch (e) {}
     const v = $("#scanVideo"); v.srcObject = stream; await v.play().catch(() => {});
-    placeFrame(); scanControls();
+    placeFrame(); scanControls(); autoFrameLoop(run);
     /* some phones only report zoom, focus and flash once the picture is running */
     setTimeout(() => { if (run === Scan.run) scanControls(); }, 800);
     scanLoop(run);
@@ -1333,7 +1430,7 @@ async function scanLoop(run) {
     if (run !== Scan.run) return;
   }
   if (scanShotMode()) { hint.textContent = Scan.added ? scanAddedMsg() : "Line the card up in the frame, then tap Scan card."; return; }
-  const guide = "Line the frame up with the card, with the card number inside the yellow box.";
+  const guide = autoFrameOn() ? "Put a card in view. The frame finds it, then the number is read." : "Line the frame up with the card, with the card number inside the yellow box.";
   hint.textContent = Scan.skipKey ? scanAddedMsg() : guide;
   let started = Date.now(), last = "", warned = false;
   Scan.skipSeen = Date.now();
@@ -1796,10 +1893,11 @@ function renderAdd() {
       <p class="muted" id="scanHint" role="status" style="margin:0">${Scan.added ? esc(scanAddedMsg()) : "Starting the camera…"}</p>
       <div class="field"><label for="langSel">Card language</label><select id="langSel">${LANGS.filter(x => x[0] !== "other").map(([k, l]) => `<option value="${k}" ${k === scanLang() ? "selected" : ""}>${l}</option>`).join("")}</select><p class="src" id="langNote" style="margin:4px 0 0"></p></div>
       <div class="scan-ctl">
+        <label class="inline-check"><input type="checkbox" id="scanAuto" ${autoFrameOn() ? "checked" : ""}> Find the card and fit the frame to it</label>
         <label>Frame size <input type="range" id="scanSize" min="30" max="100" step="1" value="${Math.round(ScanPrefs.size)}"></label>
         <label id="scanZoomRow" hidden>Camera zoom <input type="range" id="scanZoom"></label>
         <label id="scanFocusRow" hidden>Focus <input type="range" id="scanFocusDist"></label>
-        <p class="src" style="margin:0">Drag the frame to move it, pinch or use the slider to resize it, and tap the picture to focus. It remembers where you put it. <button class="linkbtn" type="button" id="scanReset">Reset frame</button></p>
+        <p class="src" style="margin:0">The frame turns yellow when it finds a card. Drag the frame to move it, pinch or use the slider to resize it, and tap the picture to focus. Moving it yourself pauses the card finder for a few seconds. <button class="linkbtn" type="button" id="scanReset">Reset frame</button></p>
       </div>
       <div class="export-actions">
         <button class="btn primary" type="button" id="scanSnap">${scanShotMode() ? "Scan card" : "Scan now"}</button>
@@ -1807,7 +1905,8 @@ function renderAdd() {
         <button class="btn" type="button" id="scanBack">${Scan.added ? "Done" : "Back"}</button>
       </div>`;
     placeFrame(); scanPointer($("#scanBox")); wireLang(b);
-    $("#scanSize").addEventListener("input", e => { ScanPrefs.size = Number(e.target.value); placeFrame(); });
+    $("#scanSize").addEventListener("input", e => { ScanPrefs.size = Number(e.target.value); placeFrame(); Scan.userMoved = Date.now(); });
+    $("#scanAuto").addEventListener("change", e => { ScanPrefs.auto = e.target.checked; saveScanPrefs(); if (!ScanPrefs.auto) $("#scanBox").classList.remove("found"); });
     $("#scanSize").addEventListener("change", saveScanPrefs);
     $("#scanReset").addEventListener("click", () => {
       Object.assign(ScanPrefs, SCAN_FRAME); delete ScanPrefs.zoom; delete ScanPrefs.focus; saveScanPrefs(); placeFrame();
