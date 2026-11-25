@@ -648,12 +648,14 @@ function matchAsia(text, lang) {
     if (s > (score.get(c) || 0)) score.set(c, s);
   }
   let list = [...score].sort((a, b) => b[1] - a[1]);
-  const coded = list.filter(([c]) => exact.has(c.set) || fuzzy.has(c.set));
-  if (coded.length) list = coded;
-  else {
-    const tot = list.filter(([c]) => found.some(f => f.total && c.set.total === f.total));
-    /* a number whose total fits no set was misread: offer nothing rather than a wrong card */
-    list = tot.length ? tot : found.some(f => f.total) ? [] : list;
+  const totOk = c => found.some(f => f.total && c.set.total === f.total);
+  const strong = c => exact.has(c.set) && (c.set.code || "").length >= 3;
+  if (found.some(f => f.total)) {
+    /* a total that fits no set means a misread: keep only cards whose set total fits, or whose full set code was read */
+    list = list.filter(([c]) => totOk(c) || strong(c));
+  } else {
+    const coded = list.filter(([c]) => exact.has(c.set) || fuzzy.has(c.set));
+    if (coded.length) list = coded;
   }
   return { cands: list.slice(0, 8).map(x => x[0]), number: found[0].raw };
 }
@@ -1256,11 +1258,11 @@ function scanCrop(video, box, frame) {
   cv.getContext("2d").drawImage(video, x, y, w, h, 0, 0, cv.width, cv.height);
   return cv;
 }
-function scanStrip(card, top, height, scale, left = 0, width = 1) {
+function scanStrip(card, top, height, scale, left = 0, width = 1, filter = "grayscale(1) contrast(1.35)") {
   const sy = Math.round(card.height * top), sh = Math.round(card.height * height);
   const sx = Math.round(card.width * left), sw = Math.round(card.width * width);
   const cv = document.createElement("canvas"); cv.width = Math.round(sw * scale); cv.height = Math.round(sh * scale);
-  const ctx = cv.getContext("2d"); ctx.filter = "grayscale(1) contrast(1.35)";
+  const ctx = cv.getContext("2d"); ctx.filter = filter;
   ctx.drawImage(card, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
   return cv;
 }
@@ -1268,7 +1270,7 @@ function scanStrip(card, top, height, scale, left = 0, width = 1) {
 function firstStrip(card, alt) {
   if (scanLang() === "en") return scanStrip(card, 0.85, 0.15, Math.min(3, Math.max(1.4, 1000 / card.width)));
   const sc = Math.min(3.5, Math.max(1.6, 700 / (card.width * 0.55)));
-  return alt ? scanStrip(card, 0.89, 0.1, Math.min(4, sc * 1.45), 0, 0.5) : scanStrip(card, 0.9, 0.1, sc, 0, 0.55);
+  return alt ? scanStrip(card, 0.89, 0.1, Math.min(4, sc * 1.45), 0, 0.5, "grayscale(1) contrast(1.9) brightness(1.08)") : scanStrip(card, 0.9, 0.1, sc, 0, 0.55);
 }
 const canvasBlob = cv => new Promise(res => cv.toBlob(res, "image/jpeg", 0.88));
 async function startScan() {
