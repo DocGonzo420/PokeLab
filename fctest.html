@@ -43,9 +43,10 @@ function findCard(cv) {
   const refine = () => { const c = best; for (let dh = -2; dh <= 2; dh++) for (let dw = -2; dw <= 2; dw++) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) tryBox(c.x + dx, c.y + dy, c.w + dw, c.h + dh); };
   refine();
   /* a card's inner border is a rectangle too: take the biggest strong rectangle around the best one */
-  const inner = best, floor = inner.s * 0.8;
+  /* (only a little bigger: a tray or stand around the card is a rectangle too) */
+  const inner = best, floor = inner.s * 0.88;
   let outer = null;
-  for (let h = inner.h + 3; h <= H - 3; h += 2) for (const a of [0.94, 1, 1.06]) {
+  for (let h = inner.h + 3; h <= Math.min(H - 3, inner.h * 1.16); h += 2) for (const a of [0.94, 1, 1.06]) {
     const w = Math.round(h * 63 / 88 * a);
     for (let y = Math.max(1, inner.y + inner.h - h); y <= inner.y; y += 2) for (let x = Math.max(1, inner.x + inner.w - w); x <= inner.x; x += 2) {
       if (x + w > W - 2 || y + h > H - 2) continue;
