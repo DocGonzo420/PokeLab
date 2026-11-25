@@ -618,7 +618,7 @@ function asiaNote(c) {
 function readNumbers(text) {
   const t = String(text || "").replace(/[|\\]/g, "/");
   const fix = d => d.replace(/[Oo]/g, "0").replace(/[Il]/g, "1");
-  const re = /(?:\b|(?<=[A-Z]))(TG|GG|SV|RC|SH|H)?([0-9OoIl]{1,3}[a-z]?)\s*\/\s*(?:TG|GG|SV|RC|SH|H)?\s?([0-9OoIl]{2,3})\b/g;
+  const re = /(?:\b|(?<=[A-Z]))(TG|GG|SV|RC|SH|H)?([0-9OoIl]{1,3}[a-z]?)\s*\/\s*(?:TG|GG|SV|RC|SH|H)?\s?([0-9OoIl]{2,3})(?![0-9])/g;
   const found = []; let m;
   while ((m = re.exec(t))) {
     if (!/\d/.test(m[2] + m[3])) continue;
@@ -1116,8 +1116,9 @@ async function scanShot(btn) {
       if (i) { await pause(120); const c2 = grab(); if (c2) card = c2; }
       if (run !== Scan.run) return;
       const scale = Math.min(3, Math.max(1.4, 1000 / card.width));
-      text = await rec(scanStrip(card, 0.85, 0.15, scale)); r = matchOCR(text);
+      text = await rec(firstStrip(card)); r = matchOCR(text);
       if (r.number && r.cands.length) break;
+      if (scanLang() !== "en") { const t1 = await rec(scanStrip(card, 0.85, 0.15, scale)); const r1 = matchOCR(t1); if (r1.number && r1.cands.length) { r = r1; text = t1; break; } }
       const t2 = await rec(scanStrip(card, 0.72, 0.28, Math.min(2.2, scale))); const r2 = matchOCR(t2);
       if (r2.number && r2.cands.length) { r = r2; text = t2; break; }
       if (Date.now() > until) break;
@@ -1251,12 +1252,18 @@ function scanCrop(video, box, frame) {
   cv.getContext("2d").drawImage(video, x, y, w, h, 0, 0, cv.width, cv.height);
   return cv;
 }
-function scanStrip(card, top, height, scale) {
+function scanStrip(card, top, height, scale, left = 0, width = 1) {
   const sy = Math.round(card.height * top), sh = Math.round(card.height * height);
-  const cv = document.createElement("canvas"); cv.width = Math.round(card.width * scale); cv.height = Math.round(sh * scale);
+  const sx = Math.round(card.width * left), sw = Math.round(card.width * width);
+  const cv = document.createElement("canvas"); cv.width = Math.round(sw * scale); cv.height = Math.round(sh * scale);
   const ctx = cv.getContext("2d"); ctx.filter = "grayscale(1) contrast(1.35)";
-  ctx.drawImage(card, 0, sy, card.width, sh, 0, 0, cv.width, cv.height);
+  ctx.drawImage(card, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
   return cv;
+}
+/* Japanese, Korean and Chinese cards print the set code and number small, bottom left: read that corner larger */
+function firstStrip(card) {
+  if (scanLang() === "en") return scanStrip(card, 0.85, 0.15, Math.min(3, Math.max(1.4, 1000 / card.width)));
+  return scanStrip(card, 0.9, 0.1, Math.min(3.5, Math.max(1.6, 700 / (card.width * 0.55))), 0, 0.55);
 }
 const canvasBlob = cv => new Promise(res => cv.toBlob(res, "image/jpeg", 0.88));
 async function startScan() {
@@ -1308,7 +1315,7 @@ async function scanLoop(run) {
     if (document.hidden || video.readyState < 2) { await pause(300); continue; }
     const card = scanCrop(video, box, frame); if (!card) { await pause(200); continue; }
     let r = null, text = "";
-    try { text = ((await w.recognize(scanStrip(card, 0.85, 0.15, Math.min(3, Math.max(1.4, 1000 / card.width))))).data.text) || ""; r = matchOCR(text); } catch (e) {}
+    try { text = ((await w.recognize(firstStrip(card))).data.text) || ""; r = matchOCR(text); } catch (e) {}
     if (run !== Scan.run) return;
     if (r && r.number && r.cands.length && Scan.skipKey && scanKey(r.number) === Scan.skipKey) {
       /* the card that was just added is still in the frame: wait for the next one */
@@ -1589,7 +1596,7 @@ async function binderRead(pg) {
     const cell = pg.cells[i];
     cell.status = "reading"; binderHint(`Reading pocket ${i + 1} of ${pg.cells.length}…`); binderRow(i);
     const scale = Math.min(3, Math.max(1.4, 1000 / cell.cv.width));
-    let text = await rec(scanStrip(cell.cv, 0.8, 0.2, scale)), r = matchOCR(text);
+    let text = await rec(scanLang() === "en" ? scanStrip(cell.cv, 0.8, 0.2, scale) : scanStrip(cell.cv, 0.86, 0.14, Math.min(3.5, Math.max(1.6, 700 / (cell.cv.width * 0.6))), 0, 0.6)), r = matchOCR(text);
     if (!(r.number && r.cands.length)) { const t2 = await rec(scanStrip(cell.cv, 0.66, 0.34, Math.min(2.2, scale))); const r2 = matchOCR(t2); if (r2.number && r2.cands.length) { r = r2; text = t2; } }
     if (r.number && r.cands.length > 1) { const top = await rec(scanStrip(cell.cv, 0.02, 0.13, 1)); const both = matchOCR(top + "\n" + text); if (both.cands.length) r = { ...r, cands: both.cands }; }
     if (run !== binder.run) return;
@@ -1942,7 +1949,17 @@ async function takePhoto(file) {
     try {
       const text = await readByOCR(add.blob, s => { add.status = s; if (add.step === "reading") renderAdd(); });
       if (scanLang() !== "en") await loadAsia(scanLang(), s => { add.status = s; if (add.step === "reading") renderAdd(); });
-      const r = matchOCR(text);
+      let r = matchOCR(text);
+      if (!(r.number && r.cands.length) && scanLang() !== "en") {
+        /* the code and number are small on these cards: read the bottom-left corner of the photo larger */
+        try {
+          const bmp = await createImageBitmap(add.blob), cv = document.createElement("canvas");
+          cv.width = bmp.width; cv.height = bmp.height; cv.getContext("2d").drawImage(bmp, 0, 0);
+          const w = await ocrWorker();
+          const t2 = ((await w.recognize(firstStrip(cv))).data.text) || ""; const r2 = matchOCR(t2);
+          if (r2.number && r2.cands.length) r = r2;
+        } catch (e) {}
+      }
       add.ocr = { number: r.number }; add.cands = r.cands; add.chosen = r.cands[0] || null;
       if (r.number && !r.cands.length) add.searchQ = r.number;
     } catch (e) {
@@ -3076,12 +3093,10 @@ window.__dbg = { loadAsia, matchAsia, searchAsia, Asia, Cat, ScanPrefs, cardFrom
     const im = new Image(); im.crossOrigin = "anonymous"; await new Promise((res, rej) => { im.onload = res; im.onerror = rej; im.src = url; });
     const cv = document.createElement("canvas"); cv.width = im.naturalWidth; cv.height = im.naturalHeight; cv.getContext("2d").drawImage(im, 0, 0);
     const w = await ocrWorker(() => {}); await loadAsia(lang);
-    const strip = (top, h, sc, l, wd) => { const sy = Math.round(cv.height * top), sh = Math.round(cv.height * h), sx = Math.round(cv.width * l), sw = Math.round(cv.width * wd);
-      const c2 = document.createElement("canvas"); c2.width = Math.round(sw * sc); c2.height = Math.round(sh * sc); const x = c2.getContext("2d"); x.filter = "grayscale(1) contrast(1.35)"; x.drawImage(cv, sx, sy, sw, sh, 0, 0, c2.width, c2.height); return c2; };
     const out = {};
-    for (const [k, a] of Object.entries({ full: [0.85, 0.15, 1.67, 0, 1], left2: [0.9, 0.1, 2, 0, 0.5], left3: [0.9, 0.1, 3, 0, 0.5], left4: [0.92, 0.08, 4, 0, 0.45] })) {
-      const t = (await w.recognize(strip(...a))).data.text; const r = matchOCR(t); out[k] = [t.replace(/\s+/g, " ").slice(0, 80), r.number, r.cands.slice(0, 2).map(c => c.id)];
-    }
+    const small = document.createElement("canvas"); small.width = 450; small.height = Math.round(cv.height * 450 / cv.width); small.getContext("2d").drawImage(cv, 0, 0, small.width, small.height);
+    for (const [k, c] of Object.entries({ corner: cv, corner450: small })) { const t = (await w.recognize(firstStrip(c))).data.text; const r = matchOCR(t); out[k] = [t.replace(/\s+/g, " ").slice(0, 70), r.number, r.cands.slice(0, 2).map(x => x.id + " " + x.name)]; }
+    const t = (await w.recognize(cv)).data.text; const r = matchOCR(t); out.whole = [r.number, r.cands.slice(0, 2).map(x => x.id)];
     return out;
   } };
 (async function boot() {
