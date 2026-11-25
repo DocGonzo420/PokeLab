@@ -1355,7 +1355,8 @@ async function autoFrameLoop(run) {
     /* two looks in a row that agree, so a passing hand doesn't move the frame */
     const same = prev && Math.abs(prev.cx - hit.cx) < 4 && Math.abs(prev.cy - hit.cy) < 4 && Math.abs(prev.size - hit.size) < 5;
     prev = hit; if (!same) continue;
-    const size = Math.min(100, hit.size * 1.02);
+    /* a hair inside the card's edge, so the number strip doesn't take in the table under the card */
+    const size = Math.min(100, hit.size * 0.98);
     if (Math.abs(ScanPrefs.cx - hit.cx) > 1.2 || Math.abs(ScanPrefs.cy - hit.cy) > 1.2 || Math.abs(ScanPrefs.size - size) > 1.5) {
       Object.assign(ScanPrefs, { cx: hit.cx, cy: hit.cy, size }); placeFrame();
     }
