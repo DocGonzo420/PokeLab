@@ -118,6 +118,8 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .sheet-head h2{margin:0;font:800 19px/1.1 var(--f-display);font-stretch:85%}
 .close{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:18px;line-height:1}
 .sheet-body{overflow:auto;padding:16px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px}
+/* the sheet scrolls; nothing in it is squashed to fit (a squashed camera box crops the picture, like a zoomed-in lens) */
+.sheet-body>*{flex-shrink:0}
 .section-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 6px}
 
 .pickers{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -150,6 +152,11 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .scan.found .scan-frame{border-color:#ffd54a}
 .scan.seen .scan-frame{border-color:#8be0a4}
 .scan.seen .scan-num{border-color:#8be0a4;border-style:solid}
+.scan-quad{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;display:none}
+.scan.quad .scan-quad{display:block}
+.scan.quad .scan-frame{border-color:transparent;box-shadow:none}
+.scan.quad .scan-num{display:none}
+.scan.seen .scan-quad .q-card,.scan.seen .scan-quad .q-num{stroke:#8be0a4;stroke-dasharray:none}
 .scan-focus{position:absolute;width:60px;height:60px;margin:-30px 0 0 -30px;border:2px solid #ffd36b;border-radius:50%;opacity:0;transform:scale(1.4);transition:opacity .25s,transform .25s;pointer-events:none}
 .scan-focus.on{opacity:1;transform:scale(1)}
 .scan-ctl{display:grid;gap:8px;margin:0}
@@ -1194,13 +1201,20 @@ function saveScanPrefs() { try { localStorage.setItem("pokelab-scan", JSON.strin
 function placeFrame() {
   const box = $("#scanBox"), f = $("#scanFrame"); if (!box || !f) return;
   const bw = box.clientWidth, bh = box.clientHeight; if (!bw || !bh) return;
-  ScanPrefs.size = Math.min(100, Math.max(30, ScanPrefs.size));
+  ScanPrefs.size = Math.min(100, bw * 88 / 63 / bh * 100, Math.max(30, ScanPrefs.size));
   const fh = bh * ScanPrefs.size / 100, fw = fh * 63 / 88;
   const mx = Math.min(50, fw / 2 / bw * 100), my = Math.min(50, fh / 2 / bh * 100);
   ScanPrefs.cx = Math.min(100 - mx, Math.max(mx, ScanPrefs.cx));
   ScanPrefs.cy = Math.min(100 - my, Math.max(my, ScanPrefs.cy));
   f.style.height = ScanPrefs.size + "%"; f.style.left = ScanPrefs.cx + "%"; f.style.top = ScanPrefs.cy + "%";
   const r = $("#scanSize"); if (r) r.value = Math.round(ScanPrefs.size);
+}
+/* shape the camera box like the camera's own picture, so none of the view is cropped away */
+function fitScanBox() {
+  const v = $("#scanVideo"), box = $("#scanBox"); if (!v || !box || !v.videoWidth || !v.videoHeight) return;
+  const r = v.videoWidth / v.videoHeight;
+  box.style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`;
+  box.style.maxWidth = `min(440px, calc(60vh * ${r.toFixed(4)}))`;
 }
 function scanHintOnce(msg) { const h = $("#scanHint"); if (h) h.textContent = msg; }
 /* box point (px) to a 0-1 point in the camera image, allowing for the cover crop */
@@ -1350,7 +1364,7 @@ function findCard(cv) {
   for (let y = best.y + Math.round(best.h * 0.1); y < best.y + best.h * 0.9; y += 2) for (let x = best.x + Math.round(best.w * 0.1); x < best.x + best.w * 0.9; x += 2) { const i = y * W + x; busy += Math.max(gx[i], gy[i]); n++; }
   best.busy = busy / n;
   if (best.busy < 0.06) return null;
-  return { cx: (best.x + best.w / 2) / W * 100, cy: (best.y + best.h / 2) / H * 100, size: best.h / H * 100, score: best.s, busy: best.busy };
+  return { cx: (best.x + best.w / 2) / W * 100, cy: (best.y + best.h / 2) / H * 100, size: best.h / H * 100, score: best.s, busy: best.busy, box: { x: best.x, y: best.y, w: best.w, h: best.h } };
 }
 /* what the frame box shows, small, for findCard */
 function boxSnapshot(video, box) {
@@ -1361,20 +1375,376 @@ function boxSnapshot(video, box) {
   cv.getContext("2d", { willReadFrequently: true }).drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, cv.width, cv.height);
   return cv;
 }
+/* ---------- a turned or tilted card: four straight edges, as four lines ----------
+   findQuad looks for straight edges in a small copy of the camera picture (a line finder that votes
+   for each edge's direction), pairs up two near-parallel long sides and two near-parallel short sides,
+   and keeps the card-shaped four-sided outline whose sides are best covered by real edges. Because each
+   side is its own line, a card that is turned or tilted away from the camera still fits.
+   Corners come back in % of the picture: top left, top right, bottom right, bottom left. */
+function findQuad(cv) {
+  const W = cv.width, H = cv.height, d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  /* edges: the strongest colour channel's slope at each pixel */
+  const mag = new Float32Array(W * H), ang = new Float32Array(W * H), jxx = new Float32Array(W * H), jyy = new Float32Array(W * H), jxy = new Float32Array(W * H);
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x; let bm = 0, bx = 0, by = 0;
+    for (let c = 0; c < 3; c++) {
+      const p = i * 4 + c, r0 = p - W * 4, r2 = p + W * 4;
+      const sx = d[r0 + 4] + 2 * d[p + 4] + d[r2 + 4] - d[r0 - 4] - 2 * d[p - 4] - d[r2 - 4];
+      const sy = d[r2 - 4] + 2 * d[r2] + d[r2 + 4] - d[r0 - 4] - 2 * d[r0] - d[r0 + 4];
+      const m = sx * sx + sy * sy; if (m > bm) { bm = m; bx = sx; by = sy; }
+    }
+    mag[i] = Math.sqrt(bm) / 4; jxx[i] = bx * bx; jyy[i] = by * by; jxy[i] = bx * by;
+  }
+  /* each pixel's edge direction, steadied by its neighbours (so a grainy table next to the card can't skew it) */
+  const blur = a => { const t = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 2; x < W - 2; x++) { const i = y * W + x; t[i] = a[i - 2] + a[i - 1] + a[i] + a[i + 1] + a[i + 2]; }
+    for (let y = 2; y < H - 2; y++) for (let x = 0; x < W; x++) { const i = y * W + x; a[i] = t[i - 2 * W] + t[i - W] + t[i] + t[i + W] + t[i + 2 * W]; } };
+  blur(jxx); blur(jyy); blur(jxy);
+  for (let i = 0; i < W * H; i++) ang[i] = 0.5 * Math.atan2(2 * jxy[i], jxx[i] - jyy[i]);
+  /* thin each edge to one pixel, keeping only real edges */
+  const T = 9, edge = new Uint8Array(W * H), step = new Float32Array(W * H);
+  for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
+    const i = y * W + x, m = mag[i]; if (m < T) continue;
+    const a = ang[i], ox = Math.round(Math.cos(a)), oy = Math.round(Math.sin(a));
+    if (m < mag[i + oy * W + ox] || m < mag[i - oy * W - ox]) continue;
+    /* a real edge is a step: the two sides differ. A thin stripe or wood grain line has the same colour on both sides. */
+    const ca = Math.cos(a) * 3, sa = Math.sin(a) * 3;
+    const x1 = Math.round(x + ca), y1 = Math.round(y + sa), x2 = Math.round(x - ca), y2 = Math.round(y - sa);
+    if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0 || x1 >= W || x2 >= W || y1 >= H || y2 >= H) continue;
+    const p1 = (y1 * W + x1) * 4, p2 = (y2 * W + x2) * 4;
+    const st = Math.max(Math.abs(d[p1] - d[p2]), Math.abs(d[p1 + 1] - d[p2 + 1]), Math.abs(d[p1 + 2] - d[p2 + 2]));
+    if (st >= 12) { edge[i] = 1; step[i] = st; }
+  }
+  /* line finder: each edge pixel votes for lines through it at about its own direction */
+  const NT = 180, D = Math.ceil(Math.hypot(W, H)), NR = 2 * D + 1, acc = new Float32Array(NT * NR);
+  const COS = new Float32Array(NT), SIN = new Float32Array(NT);
+  for (let t = 0; t < NT; t++) { COS[t] = Math.cos(t * Math.PI / NT); SIN[t] = Math.sin(t * Math.PI / NT); }
+  for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
+    const i = y * W + x; if (!edge[i]) continue;
+    let t0 = Math.round(ang[i] * NT / Math.PI); const w = Math.min(1, step[i] / 40);
+    for (let k = -6; k <= 6; k++) {
+      const t = ((t0 + k) % NT + NT) % NT, rf = x * COS[t] + y * SIN[t] + D, r = Math.floor(rf), f = rf - r, v = w * (1 - Math.abs(k) / 9);
+      acc[t * NR + r] += v * (1 - f); acc[t * NR + r + 1] += v * f;
+    }
+  }
+  const lines = [];
+  for (let t = 0; t < NT; t++) for (let r = 2; r < NR - 2; r++) {
+    const v = acc[t * NR + r]; if (v < H * 0.12) continue;
+    let peak = true;
+    for (let dt = -2; dt <= 2 && peak; dt++) for (let dr = -2; dr <= 2; dr++) {
+      if (!dt && !dr) continue;
+      const tt = ((t + dt) % NT + NT) % NT, rr = (t + dt < 0 || t + dt >= NT) ? 2 * D - (r + dr) : r + dr;
+      if (rr < 0 || rr >= NR) continue;
+      const u = acc[tt * NR + rr]; if (u > v || (u === v && (dt < 0 || (!dt && dr < 0)))) { peak = false; break; }
+    }
+    if (peak) lines.push({ t: t * Math.PI / NT, r: r - D, v });
+  }
+  lines.sort((a, b) => b.v - a.v);
+  { /* keep the strongest lines, but no more than 7 running the same way, so a striped table can't crowd out the card */
+    const per = new Uint8Array(12), keep = [];
+    /* where a line crosses the picture's edges, to tell whether two found lines are really the same one */
+    const ends = l => { const c = Math.cos(l.t), sn = Math.sin(l.t), out = [];
+      if (Math.abs(sn) > 1e-6) for (const x of [0, W]) { const y = (l.r - x * c) / sn; if (y >= 0 && y <= H) out.push({ x, y }); }
+      if (Math.abs(c) > 1e-6) for (const y of [0, H]) { const x = (l.r - y * sn) / c; if (x >= 0 && x <= W) out.push({ x, y }); }
+      return out.slice(0, 2); };
+    const dist = (l, p) => Math.abs(p.x * Math.cos(l.t) + p.y * Math.sin(l.t) - l.r);
+    for (const l of lines) {
+      const b = Math.floor(l.t / Math.PI * 12) % 12; if (per[b] >= 14) continue;
+      const e = ends(l); if (e.length < 2) continue;
+      if (keep.some(k => { const ek = ends(k); return ek.length === 2 && e.every(p => dist(k, p) < 3) && ek.every(p => dist(l, p) < 3); })) continue;
+      per[b]++; keep.push(l); if (keep.length >= 60) break;
+    }
+    lines.length = 0; lines.push(...keep);
+  }
+  /* how much of a side really lies on an edge pointing the right way */
+  const cover = (p, q, s0 = 0.08, s1 = 0.92) => {
+    const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy), na = Math.atan2(dx, -dy);
+    let hit = 0, n = 0;
+    for (let s = s0; s <= s1; s += 1 / len) {
+      const x = p.x + dx * s, y = p.y + dy * s; n++;
+      let ok = false;
+      for (let o = -1.5; o <= 1.5 && !ok; o += 0.75) {
+        const xi = Math.round(x - dy / len * o), yi = Math.round(y + dx / len * o);
+        if (xi < 0 || yi < 0 || xi >= W || yi >= H) continue;
+        const i = yi * W + xi; if (!edge[i]) continue;
+        let da = Math.abs(ang[i] - na) % Math.PI; if (da > Math.PI / 2) da = Math.PI - da;
+        if (da < 0.35) ok = true;
+      }
+      if (ok) hit++;
+    }
+    return n ? hit / n : 0;
+  };
+  const meet = (a, b) => {
+    const c1 = Math.cos(a.t), s1 = Math.sin(a.t), c2 = Math.cos(b.t), s2 = Math.sin(b.t), det = c1 * s2 - s1 * c2;
+    if (Math.abs(det) < 1e-6) return null;
+    return { x: (a.r * s2 - b.r * s1) / det, y: (c1 * b.r - c2 * a.r) / det };
+  };
+  const angDiff = (a, b) => { let x = Math.abs(a - b) % Math.PI; return x > Math.PI / 2 ? Math.PI - x : x; };
+  /* pairs of nearly parallel lines a sensible distance apart */
+  const pairs = [];
+  for (let i = 0; i < lines.length; i++) for (let j = i + 1; j < lines.length; j++) {
+    const a = lines[i], b = lines[j]; if (angDiff(a.t, b.t) > 0.21) continue;
+    const mx = W / 2, my = H / 2, da = mx * Math.cos(a.t) + my * Math.sin(a.t) - a.r, db = mx * Math.cos(b.t) + my * Math.sin(b.t) - b.r;
+    const gap = Math.abs(da - db * (Math.cos(a.t - b.t) < 0 ? -1 : 1)); if (gap < H * 0.25) continue;
+    pairs.push([a, b]);
+  }
+  let best = null; const cands = [];
+  for (let i = 0; i < pairs.length; i++) for (let j = i + 1; j < pairs.length; j++) {
+    const [a1, a2] = pairs[i], [b1, b2] = pairs[j];
+    if (Math.abs(angDiff(a1.t, b1.t) - Math.PI / 2) > 0.32) continue;
+    const c = [meet(a1, b1), meet(a1, b2), meet(a2, b2), meet(a2, b1)]; if (c.some(p => !p)) continue;
+    if (c.some(p => p.x < 1 || p.y < 1 || p.x > W - 2 || p.y > H - 2)) continue;
+    const L = k => Math.hypot(c[k].x - c[(k + 1) % 4].x, c[k].y - c[(k + 1) % 4].y);
+    const sA = (L(0) + L(2)) / 2, sB = (L(1) + L(3)) / 2, long = Math.max(sA, sB), short = Math.min(sA, sB);
+    if (long < H * 0.35) continue;
+    const asp = short / long; if (asp < 0.6 || asp > 0.84) continue;
+    /* upright cards only: the long sides run up and down (turned up to about 35 degrees) */
+    const ls = sA > sB ? 0 : 1, lv = { x: c[ls + 1].x - c[ls].x, y: c[ls + 1].y - c[ls].y };
+    if (Math.abs(lv.y) < Math.abs(lv.x) * 1.4) continue;
+    const cov = [0, 1, 2, 3].map(k => cover(c[k], c[(k + 1) % 4])), lo = Math.min(...cov);
+    if (lo < 0.4) continue;
+    /* a card's edge stops at its corners; a stripe, a table edge or a mat runs on past them */
+    const run = [0, 1, 2, 3].map(k => (cover(c[k], c[(k + 1) % 4], 1.07, 1.25) + cover(c[k], c[(k + 1) % 4], -0.25, -0.07)) / 2);
+    const s = (cov[0] + cov[1] + cov[2] + cov[3]) / 4 * 0.7 + lo * 0.3 - (run[0] + run[1] + run[2] + run[3]) / 4 * 0.6 - Math.max(...run) * 0.2;
+    if (s < 0.55) continue;
+    const area = Math.abs(c.reduce((t, p, k) => t + p.x * c[(k + 1) % 4].y - c[(k + 1) % 4].x * p.y, 0)) / 2;
+    cands.push({ c, s, lo, area, long, asp: Math.abs(asp - 63 / 88) });
+  }
+  if (!cands.length) return null;
+  /* A card has a second outline just inside its edge (where the border meets the picture).
+     The best outline with such a twin inside it is the card's own edge; a mat or tray behind the card has no twin. */
+  const inside = (p, c) => { let sgn = 0; for (let k = 0; k < 4; k++) { const a = c[k], b = c[(k + 1) % 4], z = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x); if (Math.abs(z) < 1e-9) continue; const s = Math.sign(z); if (sgn && s !== sgn) return false; sgn = s; } return true; };
+  const near = (a, b) => a.c.every(p => Math.min(...b.c.map(q => Math.hypot(q.x - p.x, q.y - p.y))) < b.long * 0.09);
+  /* how far in the inner outline sits from each side of the outer one (the width of the card's border on that side) */
+  const gaps = (o, n) => [0, 1, 2, 3].map(k => {
+    const a = o.c[k], b = o.c[(k + 1) % 4], len = Math.hypot(b.x - a.x, b.y - a.y);
+    return Math.min(...[0, 1, 2, 3].map(j => { const m = { x: (n.c[j].x + n.c[(j + 1) % 4].x) / 2, y: (n.c[j].y + n.c[(j + 1) % 4].y) / 2 };
+      return Math.abs((b.x - a.x) * (m.y - a.y) - (b.y - a.y) * (m.x - a.x)) / len; })) / o.long; });
+  let twin = null;
+  for (const o of cands) for (const n of cands) {
+    if (n === o || n.area > o.area * 0.97 || n.area < o.area / 1.45) continue;
+    if (!n.c.every(p => inside(p, o.c))) continue;
+    const g = gaps(o, n); if (Math.min(...g) < 0.012 || Math.max(...g) > 0.09) continue;
+    const v = o.s + n.s * 0.3 - (Math.max(...g) - Math.min(...g)) * 4;
+    if (!twin || v > twin.v) twin = { k: o, v };
+  }
+  if (twin) best = twin.k;
+  else for (const k of cands) if (k.asp < 0.06 && (!best || k.s > best.s)) best = k;
+  if (!best) return null;
+  /* a card lying on a mat, or in a sleeve or top loader: the card is the smaller outline inside the bigger one */
+  if (!twin) {
+    let inner = null;
+    for (const n of cands) {
+      if (n === best || n.area > best.area * 0.75 || n.s < 0.8 || n.s < best.s - 0.15 || n.asp > 0.08) continue;
+      if (!n.c.every(p => inside(p, best.c))) continue;
+      if (!inner || n.s > inner.s + 0.02 || (n.s > inner.s - 0.02 && n.area > inner.area)) inner = n;
+    }
+    if (inner) {
+      best = inner;
+      for (const n of cands) {   /* that card's own border twin, if any: the outer of the two is the card's edge */
+        if (n === inner || n.area < inner.area || n.area > inner.area * 1.45 || !inner.c.every(p => inside(p, n.c))) continue;
+        const g = gaps(n, inner); if (Math.min(...g) >= 0.012 && Math.max(...g) <= 0.09 && n.s >= 0.8) { best = n; break; }
+      }
+    }
+  }
+  /* A side sitting on the inside edge of the card's border has the border's own outer edge just outside it, with a
+     band of plain border colour in between, the same colour that lies just inside the sides that are already right.
+     Move such sides out to the card's real edge. */
+  {
+    const c = best.c, cx0 = c.reduce((t, p) => t + p.x, 0) / 4, cy0 = c.reduce((t, p) => t + p.y, 0) / 4;
+    const px = (x, y) => { const xi = Math.round(x), yi = Math.round(y); if (xi < 0 || yi < 0 || xi >= W || yi >= H) return null; const o = (yi * W + xi) * 4; return [d[o], d[o + 1], d[o + 2]]; };
+    const strip = (a, b, nx, ny, off) => { const cs = []; for (let k = 0; k <= 16; k++) { const u = 0.2 + 0.6 * k / 16, q = px(a.x + (b.x - a.x) * u + nx * off, a.y + (b.y - a.y) * u + ny * off); if (q) cs.push(q); }
+      if (cs.length < 8) return null; const m = [0, 1, 2].map(ch => cs.reduce((t, q) => t + q[ch], 0) / cs.length);
+      const sd = Math.sqrt(cs.reduce((t, q) => t + (q[0] - m[0]) ** 2 + (q[1] - m[1]) ** 2 + (q[2] - m[2]) ** 2, 0) / cs.length / 3); return { m, sd }; };
+    const cdist = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
+    const info = [0, 1, 2, 3].map(k => {
+      const a = c[k], b = c[(k + 1) % 4], len = Math.hypot(b.x - a.x, b.y - a.y);
+      let nx = (b.y - a.y) / len, ny = -(b.x - a.x) / len; const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      if ((mx + nx - cx0) ** 2 + (my + ny - cy0) ** 2 < (mx - cx0) ** 2 + (my - cy0) ** 2) { nx = -nx; ny = -ny; } /* n points outward */
+      const inn = strip(a, b, nx, ny, -Math.max(1.5, best.long * 0.012));
+      let part = null, gap = false;
+      for (let off = 1; off <= best.long * 0.09; off += 0.5) {
+        const a2 = { x: a.x + nx * off, y: a.y + ny * off }, b2 = { x: b.x + nx * off, y: b.y + ny * off }, cv = cover(a2, b2, 0.15, 0.85);
+        if (cv < 0.3) gap = true;
+        if (gap && off >= best.long * 0.012 && cv >= 0.55) { const band = strip(a, b, nx, ny, off / 2); if (band && band.sd < 20) part = { off, band, nx, ny }; break; }
+      }
+      return { inn, part };
+    });
+    const plain = info.filter(f => !f.part && f.inn).map(f => f.inn.m), withP = info.filter(f => f.part);
+    const all4 = withP.length === 4 && withP.every(f => cdist(f.part.band.m, withP[0].part.band.m) < 40);
+    const move = info.map(f => f.part && (all4 || plain.some(m => cdist(m, f.part.band.m) < 40)));
+    if (move.some(Boolean)) {
+      const sh = [0, 1, 2, 3].map(k => { const a = c[k], b = c[(k + 1) % 4], f = info[k];
+        return move[k] ? [{ x: a.x + f.part.nx * f.part.off, y: a.y + f.part.ny * f.part.off }, { x: b.x + f.part.nx * f.part.off, y: b.y + f.part.ny * f.part.off }] : [a, b]; });
+      const lineOf = ([p, q]) => { const t = Math.atan2(q.x - p.x, -(q.y - p.y)); return { t, r: p.x * Math.cos(t) + p.y * Math.sin(t) }; };
+      const ls = sh.map(lineOf), c2 = [0, 1, 2, 3].map(k => meet(ls[(k + 3) % 4], ls[k]));
+      if (c2.every(p => p)) best.c = c2;
+    }
+  }
+  /* sharpen each side: fit a straight line through the edge pixels lying right along it */
+  const fit = (p, q) => {
+    const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len, na = Math.atan2(dx, -dy);
+    let sw = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+    const x0 = Math.max(2, Math.floor(Math.min(p.x, q.x) - 3)), x1 = Math.min(W - 3, Math.ceil(Math.max(p.x, q.x) + 3));
+    const y0 = Math.max(2, Math.floor(Math.min(p.y, q.y) - 3)), y1 = Math.min(H - 3, Math.ceil(Math.max(p.y, q.y) + 3));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const i = y * W + x; if (!edge[i]) continue;
+      const t = ((x - p.x) * ux + (y - p.y) * uy) / len; if (t < 0.1 || t > 0.9) continue;
+      if (Math.abs((x - p.x) * uy - (y - p.y) * ux) > 2.5) continue;
+      let da = Math.abs(ang[i] - na) % Math.PI; if (da > Math.PI / 2) da = Math.PI - da; if (da > 0.3) continue;
+      const w = step[i]; sw += w; sx += w * x; sy += w * y; sxx += w * x * x; syy += w * y * y; sxy += w * x * y;
+    }
+    if (sw <= 0) return null;
+    const mx = sx / sw, my = sy / sw, cxx = sxx / sw - mx * mx, cyy = syy / sw - my * my, cxy = sxy / sw - mx * my;
+    const th = 0.5 * Math.atan2(2 * cxy, cxx - cyy) + Math.PI / 2; /* the normal: across the spread of points */
+    return { t: th, r: mx * Math.cos(th) + my * Math.sin(th) };
+  };
+  {
+    const ls = [0, 1, 2, 3].map(k => fit(best.c[k], best.c[(k + 1) % 4]));
+    if (ls.every(l => l)) {
+      const c2 = [0, 1, 2, 3].map(k => meet(ls[(k + 3) % 4], ls[k]));
+      if (c2.every(p => p && Math.min(...best.c.map(q => Math.hypot(q.x - p.x, q.y - p.y))) < 4)) best.c = c2;
+    }
+  }
+  const c = best.c;
+  /* a card has print inside it; an empty tray or shadow does not */
+  const cx = c.reduce((t, p) => t + p.x, 0) / 4, cy = c.reduce((t, p) => t + p.y, 0) / 4;
+  let busy = 0, n = 0;
+  for (let k = 0; k < 400; k++) {
+    const u = 0.15 + 0.7 * (k % 20) / 19, v = 0.15 + 0.7 * Math.floor(k / 20) / 19;
+    const x = Math.round(c[0].x + (c[1].x - c[0].x) * u + (c[3].x - c[0].x) * v), y = Math.round(c[0].y + (c[1].y - c[0].y) * u + (c[3].y - c[0].y) * v);
+    if (x < 0 || y < 0 || x >= W || y >= H) continue; busy += Math.min(1, mag[y * W + x] / 30); n++;
+  }
+  busy = n ? busy / n : 0; if (busy < 0.08) return null;
+  /* order the corners: top side first (the short side higher up), then clockwise */
+  const ord = [...c].sort((p, q) => Math.atan2(p.y - cy, p.x - cx) - Math.atan2(q.y - cy, q.x - cx)); /* clockwise on screen */
+  const len = k => Math.hypot(ord[k].x - ord[(k + 1) % 4].x, ord[k].y - ord[(k + 1) % 4].y);
+  let st = 0, bestY = Infinity;
+  for (let k = 0; k < 4; k++) {
+    const shortSide = len(k) + len((k + 2) % 4) < len((k + 1) % 4) + len((k + 3) % 4);
+    const my = (ord[k].y + ord[(k + 1) % 4].y) / 2;
+    if (shortSide && my < bestY) { bestY = my; st = k; }
+  }
+  const pts = [0, 1, 2, 3].map(k => ord[(st + k) % 4]);
+  const hgt = (Math.hypot(pts[3].x - pts[0].x, pts[3].y - pts[0].y) + Math.hypot(pts[2].x - pts[1].x, pts[2].y - pts[1].y)) / 2;
+  return { pts: pts.map(p => ({ x: p.x / W * 100, y: p.y / H * 100 })), cx: cx / W * 100, cy: cy / H * 100, size: hgt / H * 100, score: best.s, busy,
+    deg: Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) * 180 / Math.PI };
+}
+/* the 3 x 3 map that sends the corners of a w x h box to the four points q (perspective) */
+function boxToQuad(w, h, q) {
+  const src = [[0, 0], [w, 0], [w, h], [0, h]], A = [], B = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], u = q[i].x, v = q[i].y;
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); B.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); B.push(v);
+  }
+  for (let c = 0; c < 8; c++) {
+    let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]]; [B[c], B[p]] = [B[p], B[c]];
+    const piv = A[c][c]; if (Math.abs(piv) < 1e-12) return null;
+    for (let r = 0; r < 8; r++) if (r !== c) { const f = A[r][c] / piv; if (!f) continue; for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k]; B[r] -= f * B[c]; }
+  }
+  return B.map((v, i) => v / A[i][i]);
+}
+/* cut the card out of src along four corners (in src pixels) and lay it flat and straight, w x h */
+function flattenQuad(src, sw, sh, q, w, h) {
+  const m = boxToQuad(w, h, q); if (!m) return null;
+  const x0 = Math.max(0, Math.floor(Math.min(...q.map(p => p.x))) - 1), y0 = Math.max(0, Math.floor(Math.min(...q.map(p => p.y))) - 1);
+  const x1 = Math.min(sw, Math.ceil(Math.max(...q.map(p => p.x))) + 1), y1 = Math.min(sh, Math.ceil(Math.max(...q.map(p => p.y))) + 1);
+  const bw = x1 - x0, bh = y1 - y0; if (bw < 2 || bh < 2) return null;
+  const tmp = document.createElement("canvas"); tmp.width = bw; tmp.height = bh;
+  const tc = tmp.getContext("2d", { willReadFrequently: true }); tc.drawImage(src, x0, y0, bw, bh, 0, 0, bw, bh);
+  const sd = tc.getImageData(0, 0, bw, bh).data;
+  const out = document.createElement("canvas"); out.width = w; out.height = h;
+  const oc = out.getContext("2d"), img = oc.createImageData(w, h), od = img.data;
+  const [a, b, c, d, e, f, g, k] = m;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const z = g * x + k * y + 1, sx = (a * x + b * y + c) / z - x0, sy = (d * x + e * y + f) / z - y0;
+    const ix = Math.floor(sx), iy = Math.floor(sy), o = (y * w + x) * 4;
+    od[o + 3] = 255;
+    if (ix < 0 || iy < 0 || ix >= bw - 1 || iy >= bh - 1) continue;
+    const fx = sx - ix, fy = sy - iy, p = (iy * bw + ix) * 4, p2 = p + bw * 4;
+    for (let ch = 0; ch < 3; ch++) {
+      const top = sd[p + ch] + (sd[p + 4 + ch] - sd[p + ch]) * fx, bot = sd[p2 + ch] + (sd[p2 + 4 + ch] - sd[p2 + ch]) * fx;
+      od[o + ch] = top + (bot - top) * fy;
+    }
+  }
+  oc.putImageData(img, 0, 0);
+  return out;
+}
+/* what the frame box shows at 240 x 320 or so, shrunk in halves so fine edges stay sharp (one big shrink loses them) */
+function boxSnapshotHi(video, box) {
+  const vw = video.videoWidth, vh = video.videoHeight, bw = box.clientWidth, bh = box.clientHeight;
+  if (!vw || !vh || !bw || !bh) return null;
+  const s = Math.max(bw / vw, bh / vh), sw = bw / s, sh = bh / s;
+  const k = 320 / Math.max(bw, bh), w = Math.round(bw * k), h = Math.round(bh * k);
+  let c = document.createElement("canvas"); c.width = Math.round(sw); c.height = Math.round(sh);
+  c.getContext("2d").drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, c.width, c.height);
+  while (c.width / 2 >= w * 1.2) {
+    const n = document.createElement("canvas"); n.width = Math.round(c.width / 2); n.height = Math.round(c.height / 2);
+    const g = n.getContext("2d"); g.imageSmoothingQuality = "high"; g.drawImage(c, 0, 0, n.width, n.height); c = n;
+  }
+  const o = document.createElement("canvas"); o.width = w; o.height = h;
+  const g = o.getContext("2d", { willReadFrequently: true }); g.imageSmoothingQuality = "high"; g.drawImage(c, 0, 0, w, h);
+  return o;
+}
+/* a point of the card (u, v from 0 to 1 across and down) to the screen, through the four corners */
+function quadPoint(m, u, v) { const z = m[6] * u + m[7] * v + 1; return { x: (m[0] * u + m[1] * v + m[2]) / z, y: (m[3] * u + m[4] * v + m[5]) / z }; }
+/* draw the found outline (corners in % of the camera box), or hide it */
+function showQuad(pts) {
+  const box = $("#scanBox"), svg = $("#scanQuad"); if (!box || !svg) return;
+  Scan.quad = pts ? { pts, at: Date.now() } : null;
+  box.classList.toggle("quad", !!pts);
+  if (!pts) return;
+  /* drawn in the box's own pixels, so the lines keep an even width */
+  const bw = box.clientWidth, bh = box.clientHeight, px = pts.map(p => ({ x: p.x / 100 * bw, y: p.y / 100 * bh }));
+  const m = boxToQuad(1, 1, px); if (!m) return;
+  const path = ps => "M" + ps.map(p => p.x.toFixed(1) + " " + p.y.toFixed(1)).join(" L") + " Z";
+  svg.setAttribute("viewBox", `0 0 ${bw} ${bh}`);
+  svg.querySelector(".q-mask").setAttribute("d", `M0 0 H${bw} V${bh} H0 Z ` + path(px));
+  svg.querySelector(".q-halo").setAttribute("d", path(px));
+  svg.querySelector(".q-card").setAttribute("d", path(px));
+  svg.querySelector(".q-num").setAttribute("d", path([[0.04, 0.86], [0.96, 0.86], [0.96, 0.98], [0.04, 0.98]].map(([u, v]) => quadPoint(m, u, v))));
+}
 const autoFrameOn = () => ScanPrefs.auto !== false;
 async function autoFrameLoop(run) {
-  const video = $("#scanVideo"), box = $("#scanBox"); let prev = null, misses = 0;
+  const video = $("#scanVideo"), box = $("#scanBox"); let prev = null, prevQ = null, misses = 0, qMiss = 0;
+  showQuad(null);
   while (run === Scan.run) {
     await pause(220);
-    if (run !== Scan.run || !autoFrameOn() || document.hidden || video.readyState < 2) { prev = null; continue; }
-    if (Date.now() - (Scan.userMoved || 0) < 4000) { prev = null; continue; }
+    if (run !== Scan.run) break;
+    if (!autoFrameOn() || document.hidden || video.readyState < 2) { prev = prevQ = null; if (Scan.quad) showQuad(null); continue; }
+    if (Date.now() - (Scan.userMoved || 0) < 4000) { prev = prevQ = null; if (Scan.quad) showQuad(null); continue; }
+    /* first look for the card's four edges, so a turned or tilted card is outlined as it lies */
+    const hq = boxSnapshotHi(video, box); let quad = null;
+    try { quad = hq && findQuad(hq); } catch (e) { quad = null; }
+    if (run !== Scan.run) break;
+    if (quad) {
+      misses = 0; qMiss = 0; prev = null;
+      /* two looks in a row that agree, so a passing hand doesn't move the outline */
+      const same = prevQ && quad.pts.every((p, k) => Math.abs(p.x - prevQ.pts[k].x) < 3 && Math.abs(p.y - prevQ.pts[k].y) < 3);
+      prevQ = quad; if (!same) continue;
+      showQuad(quad.pts);
+      /* keep the plain frame under the card too, so it is in the right place if the outline is lost */
+      const size = Math.min(100, quad.size * 0.98);
+      if (Math.abs(ScanPrefs.cx - quad.cx) > 1.2 || Math.abs(ScanPrefs.cy - quad.cy) > 1.2 || Math.abs(ScanPrefs.size - size) > 1.5) {
+        Object.assign(ScanPrefs, { cx: quad.cx, cy: quad.cy, size }); placeFrame();
+      }
+      box.classList.add("found");
+      continue;
+    }
+    prevQ = null;
+    /* one missed look doesn't drop the outline; a few in a row do */
+    if (Scan.quad && ++qMiss < 5) continue;
+    /* no four edges: fall back to the upright card finder */
     const cv = boxSnapshot(video, box); if (!cv) continue;
     const hit = findCard(cv);
-    if (!hit) { if (++misses > 6) { box.classList.remove("found"); prev = null; } continue; }
+    if (!hit) { if (++misses > 6) { box.classList.remove("found"); prev = null; if (Scan.quad) showQuad(null); } continue; }
     misses = 0;
     /* two looks in a row that agree, so a passing hand doesn't move the frame */
     const same = prev && Math.abs(prev.cx - hit.cx) < 4 && Math.abs(prev.cy - hit.cy) < 4 && Math.abs(prev.size - hit.size) < 5;
     prev = hit; if (!same) continue;
+    if (Scan.quad) showQuad(null);
     /* a hair inside the card's edge, so the number strip doesn't take in the table under the card */
     const size = Math.min(100, hit.size * 0.98);
     if (Math.abs(ScanPrefs.cx - hit.cx) > 1.2 || Math.abs(ScanPrefs.cy - hit.cy) > 1.2 || Math.abs(ScanPrefs.size - size) > 1.5) {
@@ -1387,12 +1757,22 @@ function stopScan() {
   Scan.run++;
   if (Scan.stream) Scan.stream.getTracks().forEach(t => t.stop());
   clearTimeout(Scan.focusTimer); clearTimeout(Scan.idleTimer);
-  Scan.stream = null; Scan.track = null; Scan.torch = false; Scan.caps = {};
+  Scan.stream = null; Scan.track = null; Scan.torch = false; Scan.caps = {}; Scan.quad = null;
 }
 function scanCrop(video, box, frame) {
   const vw = video.videoWidth, vh = video.videoHeight; if (!vw || !vh) return null;
   const b = box.getBoundingClientRect(), f = frame.getBoundingClientRect(); if (!b.width || !f.width) return null;
   const s = Math.max(b.width / vw, b.height / vh), ox = (b.width - vw * s) / 2, oy = (b.height - vh * s) / 2;
+  if (Scan.quad && box.classList.contains("quad")) {
+    /* the card is outlined: cut it out along its four corners and lay it flat and straight for reading */
+    const m = boxToQuad(1, 1, Scan.quad.pts);
+    if (m) {
+      const q = [[0.01, 0.01], [0.99, 0.01], [0.99, 0.99], [0.01, 0.99]].map(([u, v]) => { const p = quadPoint(m, u, v); return { x: (p.x / 100 * b.width - ox) / s, y: (p.y / 100 * b.height - oy) / s }; });
+      const ch = (Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y) + Math.hypot(q[2].x - q[1].x, q[2].y - q[1].y)) / 2;
+      const h = Math.round(Math.min(1100, Math.max(300, ch))), w = Math.round(h * 63 / 88);
+      try { const flat = flattenQuad(video, vw, vh, q, w, h); if (flat) return flat; } catch (e) {}
+    }
+  }
   let x = (f.left - b.left - ox) / s, y = (f.top - b.top - oy) / s, w = f.width / s, h = f.height / s;
   x = Math.max(0, x); y = Math.max(0, y); w = Math.min(vw - x, w); h = Math.min(vh - y, h);
   const k = Math.min(1, 1100 / h);
@@ -1427,7 +1807,7 @@ async function startScan() {
   try {
     /* the camera stays on while you check a match, so the next scan starts at once */
     const reuse = Scan.stream && Scan.stream.active && Scan.track && Scan.track.readyState === "live";
-    const stream = reuse ? Scan.stream : await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    const stream = reuse ? Scan.stream : await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
     if (run !== Scan.run || add.step !== "scan") { if (!reuse) stream.getTracks().forEach(t => t.stop()); return; }
     if (!reuse) { if (Scan.stream) Scan.stream.getTracks().forEach(t => t.stop()); Scan.torch = false; }
     Scan.stream = stream; Scan.track = stream.getVideoTracks()[0];
@@ -1436,6 +1816,7 @@ async function startScan() {
       if (ScanPrefs.focus == null && caps.focusMode && caps.focusMode.includes("continuous")) Scan.track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
     } catch (e) {}
     const v = $("#scanVideo"); v.srcObject = stream; await v.play().catch(() => {});
+    fitScanBox(); v.addEventListener("resize", () => { fitScanBox(); placeFrame(); });
     placeFrame(); scanControls(); autoFrameLoop(run);
     /* some phones only report zoom, focus and flash once the picture is running */
     setTimeout(() => { if (run === Scan.run) scanControls(); }, 800);
@@ -1995,7 +2376,7 @@ function renderAdd() {
   if (add.step === "binder") { renderBinder(b); return; }
   if (add.step === "scan") {
     b.innerHTML = `
-      <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view. Tap to focus."></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div><span class="scan-focus" id="scanFocus" aria-hidden="true"></span></div>
+      <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view. Tap to focus."></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div><svg class="scan-quad" id="scanQuad" aria-hidden="true"><path class="q-mask" fill="rgba(0,0,0,.45)" fill-rule="evenodd"/><path class="q-halo" fill="none" stroke="rgba(0,0,0,.7)" stroke-width="8" stroke-linejoin="round"/><path class="q-card" fill="none" stroke="#ffd54a" stroke-width="4" stroke-linejoin="round"/><path class="q-num" fill="none" stroke="#ffd36b" stroke-width="2" stroke-dasharray="6 4"/></svg><span class="scan-focus" id="scanFocus" aria-hidden="true"></span></div>
       <div class="seg" role="group" aria-label="Scan mode"><button type="button" data-smode="auto" aria-pressed="${!scanShotMode()}">Continuous</button><button type="button" data-smode="shot" aria-pressed="${scanShotMode()}">Single shot</button></div>
       <p class="muted" id="scanHint" role="status" style="margin:0">${Scan.added ? esc(scanAddedMsg()) : "Starting the camera…"}</p>
       <div class="field"><label for="langSel">Card language</label><select id="langSel">${LANGS.filter(x => x[0] !== "other").map(([k, l]) => `<option value="${k}" ${k === scanLang() ? "selected" : ""}>${l}</option>`).join("")}</select><p class="src" id="langNote" style="margin:4px 0 0"></p></div>
