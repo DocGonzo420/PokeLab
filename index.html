@@ -1607,7 +1607,7 @@ function openCollSheet(mode, coll, done) {
   if (mode === "delete") {
     const n = Store.cards.filter(c => c.coll === coll.id).reduce((t, c) => t + (c.qty || 1), 0);
     title.textContent = "Delete binder";
-    body.innerHTML = `<p style="margin:0">Delete <b>${esc(coll.name)}</b>? ${n ? `Its ${plural(n, "card")} stay in your collection, just not in a binder.` : "It has no cards in it."}</p>
+    body.innerHTML = `<p style="margin:0">Delete <b>${esc(coll.name)}</b>? ${n === 1 ? "Its card stays in your collection, just not in a binder." : n ? `Its ${n} cards stay in your collection, just not in a binder.` : "It has no cards in it."}</p>
       <div class="actions"><button class="btn danger" type="button" id="collYes">Delete binder</button><button class="btn" type="button" id="collNo">Keep it</button></div>`;
     $("#collNo").addEventListener("click", () => $("#collSheet").close());
     $("#collYes").addEventListener("click", async e => {
