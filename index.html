@@ -244,6 +244,8 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
 .exports{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .exports .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-right:2px}
 .exports .muted{font-size:12.5px}
+.colls select{flex:1 1 160px;min-width:0;max-width:320px}
+.coll-err{color:var(--bad,#c0392b);font-size:13.5px;margin:0}
 .export-prev{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--line);background:#0d1016}
 .export-actions{display:flex;flex-wrap:wrap;gap:8px}
 
@@ -351,7 +353,7 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
       <span class="sub" id="modeLine">Card catalogue</span>
     </div>
     <div class="value">
-      <div class="label">Collection value</div>
+      <div class="label" id="totalLabel">Collection value</div>
       <div class="big" id="totalValue">$0.00</div>
       <div class="meta" id="totalMeta">0 cards</div>
     </div>
@@ -367,6 +369,7 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
 <main class="wrap">
   <div id="notices"></div>
   <div class="filters" id="filters">
+    <div class="exports colls"><label class="k" for="fColl">Binder</label><select id="fColl"><option value="">All cards</option></select><button class="btn small" type="button" id="collNew">New binder</button><button class="btn small ghost" type="button" id="collRen" hidden>Rename</button><button class="btn small ghost" type="button" id="collDel" hidden>Delete</button></div>
     <div class="field search"><label for="q">Search your cards</label><input id="q" type="search" placeholder="Name, set or number" autocomplete="off"></div>
     <div class="field"><label for="fSet">Set</label><select id="fSet"><option value="">All sets</option></select></div>
     <div class="field"><label for="fRarity">Rarity</label><select id="fRarity"><option value="">All rarities</option></select></div>
@@ -396,6 +399,13 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
   <div class="sheet-inner">
     <div class="sheet-head"><h2 id="addTitle">Add a card</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
     <div class="sheet-body" id="addBody"></div>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="collSheet" aria-labelledby="collTitle">
+  <div class="sheet-inner">
+    <div class="sheet-head"><h2 id="collTitle">New binder</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
+    <div class="sheet-body" id="collBody"></div>
   </div>
 </dialog>
 
@@ -944,7 +954,7 @@ async function fetchPrices(cards) {
 
 /* ---------- storage: Claude's store when available, else this browser ---------- */
 const Store = {
-  mode: "none", cards: [], decks: [], listeners: [], db: null, assets: null, uid: null, idb: null, urls: new Map(),
+  mode: "none", cards: [], decks: [], colls: [], listeners: [], db: null, assets: null, uid: null, idb: null, urls: new Map(),
   onChange(fn) { this.listeners.push(fn); },
   emit() { for (const f of this.listeners) f(this.cards); },
   async init() {
@@ -961,6 +971,7 @@ const Store = {
             this.col.onSnapshot(snap => {
               this.cards = snap.docs.filter(d => d.id.startsWith("card_")).map(d => ({ ...d.data(), id: d.id }));
               this.decks = snap.docs.filter(d => d.id.startsWith("deck_")).map(d => ({ ...d.data(), id: d.id }));
+              this.colls = snap.docs.filter(d => d.id.startsWith("coll_")).map(d => ({ ...d.data(), id: d.id }));
               if (!snap.metadata.fromCache) { clearTimeout(timer); Notices.hide("slow"); }
               this.emit(); finish();
             }, err => { clearTimeout(timer); Notices.show("dberr", "Your saved cards couldn't load just now. Reopen the page to try again."); finish(); });
@@ -973,18 +984,20 @@ const Store = {
   async initLocal() {
     try {
       this.idb = await new Promise((res, rej) => {
-        const r = indexedDB.open("poke-lab", 2);
+        const r = indexedDB.open("poke-lab", 3);
         r.onupgradeneeded = e => {
           const db = r.result;
           if (!db.objectStoreNames.contains("cards")) db.createObjectStore("cards", { keyPath: "id" });
           if (!db.objectStoreNames.contains("photos")) db.createObjectStore("photos");
           if (!db.objectStoreNames.contains("decks")) db.createObjectStore("decks", { keyPath: "id" });
+          if (!db.objectStoreNames.contains("colls")) db.createObjectStore("colls", { keyPath: "id" });
         };
         r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
       });
       this.mode = "local";
       this.cards = await this.tx("cards", "readonly", s => s.getAll());
       this.decks = await this.tx("decks", "readonly", s => s.getAll());
+      this.colls = await this.tx("colls", "readonly", s => s.getAll());
     } catch (e) {
       this.mode = "memory"; this.cards = [];
       Notices.show("mem", "This browser isn't letting the page save, so cards you add will be gone when you close it.");
@@ -1044,6 +1057,24 @@ const Store = {
     if (this.mode === "cloud") { await this.col.doc(deck.id).delete(); return; }
     this.decks = this.decks.filter(d => d.id !== deck.id);
     if (this.mode === "local") await this.tx("decks", "readwrite", s => s.delete(deck.id));
+    this.emit();
+  },
+  async putColl(coll) {
+    const clean = JSON.parse(JSON.stringify(coll)); const id = clean.id; delete clean.id;
+    const full = { ...clean, id };
+    const i = this.colls.findIndex(b => b.id === id);
+    if (i >= 0) this.colls[i] = full; else this.colls.push(full);
+    if (this.mode === "cloud") { await this.col.doc(id).set(clean); return; }
+    if (this.mode === "local") await this.tx("colls", "readwrite", s => s.put(full));
+    this.emit();
+  },
+  /* Deleting a binder keeps its cards; they just stop belonging to any binder. */
+  async removeColl(coll) {
+    const moved = this.cards.filter(c => c.coll === coll.id).map(c => { const n = { ...c }; delete n.coll; return n; });
+    if (moved.length) await this.putMany(moved);
+    if (this.mode === "cloud") { await this.col.doc(coll.id).delete(); return; }
+    this.colls = this.colls.filter(b => b.id !== coll.id);
+    if (this.mode === "local") await this.tx("colls", "readwrite", s => s.delete(coll.id));
     this.emit();
   },
   async remove(card) {
@@ -1538,7 +1569,7 @@ function imgTag(src, alt, cls = "") {
 }
 
 /* ---------- collection view ---------- */
-const view = { q: "", set: "", rarity: "", sort: "value", tab: "binder", arranging: false, focusAfter: null };
+const view = { q: "", coll: "", set: "", rarity: "", sort: "value", tab: "binder", arranging: false, focusAfter: null };
 const photoCache = new Map();
 function cardFromCatalogue(c) {
   if (c.lang) {
@@ -1547,6 +1578,82 @@ function cardFromCatalogue(c) {
       lang: c.lang, img: cardImage(c, false), imgL: cardImage(c, true), fromJa: !!c.fromJa, nameEn: c.nameEn || "", twinId: t ? t.id : "", ...(c.manual ? { manual: true } : {}) };
   }
   return { cardId: c.id, name: c.name, number: c.number, setId: c.set.id, setName: c.set.name, setCode: c.set.code, printedTotal: c.set.total, series: c.set.series, released: c.set.released, rarity: c.rarity || "", supertype: c.supertype || "" };
+}
+/* ---------- binders: named groups a card can belong to (card.coll holds the binder id) ---------- */
+const collById = id => (id && Store.colls.find(b => b.id === id)) || null;
+const collsSorted = () => [...Store.colls].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || String(a.name).localeCompare(String(b.name)));
+const inColl = (c, v) => !v || (v === "none" ? !collById(c.coll) : c.coll === v);
+function collCards() { return Store.cards.filter(c => inColl(c, view.coll)); }
+function setCollView(v) { view.coll = v || ""; try { localStorage.setItem("pokelab-coll", view.coll); } catch (x) {} }
+function addToColl() { let v = ""; try { v = localStorage.getItem("pokelab-addto") || ""; } catch (x) {} return collById(v) ? v : ""; }
+function setAddTo(v) { try { localStorage.setItem("pokelab-addto", v || ""); } catch (x) {} }
+function collOptions(sel) {
+  return `<option value="">No binder</option>` + collsSorted().map(b => `<option value="${esc(b.id)}" ${b.id === sel ? "selected" : ""}>${esc(b.name)}</option>`).join("") + `<option value="__new">New binder…</option>`;
+}
+function addToField() { return `<div class="field"><label for="addTo">Add to binder</label><select id="addTo">${collOptions(addToColl())}</select></div>`; }
+function wireAddTo(b) {
+  const sel = b.querySelector("#addTo"); if (!sel) return;
+  sel.addEventListener("change", () => {
+    if (sel.value !== "__new") { setAddTo(sel.value); return; }
+    sel.value = addToColl();
+    openCollSheet("new", null, id => { if (id) setAddTo(id); const s2 = $("#addTo"); if (s2) s2.innerHTML = collOptions(addToColl()); });
+  });
+}
+/* small sheet for naming, renaming and deleting a binder; done(id or null) runs when it closes */
+let collDone = null;
+function openCollSheet(mode, coll, done) {
+  collDone = done || null;
+  const body = $("#collBody"), title = $("#collTitle");
+  if (mode === "delete") {
+    const n = Store.cards.filter(c => c.coll === coll.id).reduce((t, c) => t + (c.qty || 1), 0);
+    title.textContent = "Delete binder";
+    body.innerHTML = `<p style="margin:0">Delete <b>${esc(coll.name)}</b>? ${n === 1 ? "Its card stays in your collection, just not in a binder." : n ? `Its ${n} cards stay in your collection, just not in a binder.` : "It has no cards in it."}</p>
+      <div class="actions"><button class="btn danger" type="button" id="collYes">Delete binder</button><button class="btn" type="button" id="collNo">Keep it</button></div>`;
+    $("#collNo").addEventListener("click", () => $("#collSheet").close());
+    $("#collYes").addEventListener("click", async e => {
+      e.currentTarget.disabled = true;
+      await Store.removeColl(coll);
+      if (view.coll === coll.id) setCollView("");
+      $("#collSheet").close(); renderList(); toast(`Deleted ${coll.name}`);
+    });
+  } else {
+    title.textContent = mode === "rename" ? "Rename binder" : "New binder";
+    body.innerHTML = `<form id="collForm" style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label for="collName">Binder name</label><input id="collName" type="text" maxlength="40" autocomplete="off" placeholder="Like Trade binder or Japanese cards" value="${coll ? esc(coll.name) : ""}"></div>
+      <p class="coll-err" id="collErr" role="alert" hidden></p>
+      <div class="actions"><button class="btn primary" type="submit">${mode === "rename" ? "Save name" : "Make binder"}</button><button class="btn" type="button" id="collNo">Cancel</button></div></form>`;
+    $("#collNo").addEventListener("click", () => $("#collSheet").close());
+    $("#collForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const name = $("#collName").value.replace(/\s+/g, " ").trim(), err = $("#collErr");
+      const clash = Store.colls.find(b => b.name.toLowerCase() === name.toLowerCase() && (!coll || b.id !== coll.id));
+      if (!name || clash) { err.textContent = name ? `You already have a binder called ${clash.name}.` : "Give the binder a name."; err.hidden = false; return; }
+      const rec = coll ? { ...coll, name } : { id: "coll_" + uid(), name, createdAt: Date.now() };
+      await Store.putColl(rec);
+      const cb = collDone; collDone = null; $("#collSheet").close(); renderList();
+      if (cb) cb(rec.id);
+      toast(coll ? `Renamed to ${name}` : `Made ${name}`);
+    });
+  }
+  $("#collSheet").showModal();
+  const inp = $("#collName"); if (inp) setTimeout(() => inp.focus(), 50);
+}
+$("#collSheet").addEventListener("close", () => { const cb = collDone; collDone = null; if (cb) cb(null); });
+function renderCollBar() {
+  const sel = $("#fColl"), list = collsSorted();
+  if (view.coll && view.coll !== "none" && !collById(view.coll) && Store.mode !== "cloud") setCollView("");
+  const count = v => Store.cards.filter(c => inColl(c, v)).reduce((t, c) => t + (c.qty || 1), 0);
+  sel.innerHTML = `<option value="">All cards (${count("")})</option>` + list.map(b => `<option value="${esc(b.id)}">${esc(b.name)} (${count(b.id)})</option>`).join("") +
+    (list.length ? `<option value="none">Not in a binder (${count("none")})</option>` : "");
+  sel.value = view.coll; if (sel.value !== view.coll) { sel.value = ""; }
+  const one = collById(view.coll);
+  $("#collRen").hidden = !one; $("#collDel").hidden = !one;
+  const lab = $("#totalLabel"); if (lab) lab.textContent = one ? one.name : view.coll === "none" ? "Not in a binder" : "Collection value";
+}
+function emptyMsg() {
+  const one = collById(view.coll);
+  if (one && !Store.cards.some(c => c.coll === one.id)) return `${esc(one.name)} has no cards yet. Tap Add a card and they'll go into it.`;
+  return "No cards match these filters.";
 }
 function renderTotals(cards) {
   let total = 0, priced = 0, count = 0; const sets = new Set();
@@ -1569,7 +1676,7 @@ function renderFilters(cards) {
 /* the cards the binder and gallery show, after search, filters and sort */
 function visibleRows() {
   const q = norm(view.q), qn = normName(view.q);
-  const rows = Store.cards.filter(c => (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) &&
+  const rows = Store.cards.filter(c => inColl(c, view.coll) && (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) &&
     (!view.q.trim() || (q && (norm(c.name) + " " + norm(c.nameEn) + " " + norm(c.setName) + " " + norm(c.setCode) + " " + norm(c.number)).includes(q)) || (qn && (normName(c.name) + normName(c.setName)).includes(qn))));
   return rows.sort(SORTS[view.sort] || SORTS.value);
 }
@@ -1597,9 +1704,9 @@ async function saveManualOrder(visibleIds) {
   if (changed.length) await Store.putMany(changed); else renderList();
 }
 async function renderList() {
-  const cards = Store.cards;
-  renderTotals(cards); renderFilters(cards);
-  const has = cards.length > 0; const tab = view.tab;
+  const cards = collCards();
+  renderCollBar(); renderTotals(cards); renderFilters(cards);
+  const has = Store.cards.length > 0; const tab = view.tab;
   if (tab === "decks") { view.arranging = false; $("#gtools").hidden = true; $("#filters").hidden = true; $("#empty").hidden = true; $("#fab").hidden = true; $("#list").hidden = true; $("#gallery").hidden = true; $("#decks").hidden = false; return renderDecks(); }
   $("#decks").hidden = true; $("#list").hidden = tab !== "binder"; $("#gallery").hidden = tab !== "gallery";
   if (tab !== "gallery") view.arranging = false;
@@ -1608,7 +1715,7 @@ async function renderList() {
   const rows = visibleRows();
   if (tab === "gallery") return renderGallery(rows);
   const list = $("#list");
-  if (has && !rows.length) { list.innerHTML = `<li class="muted" style="padding:16px 4px">No cards match these filters.</li>`; return; }
+  if (has && !rows.length) { list.innerHTML = `<li class="muted" style="padding:16px 4px">${emptyMsg()}</li>`; return; }
   const both = Prefs.pics === "both";
   list.innerHTML = rows.map(c => {
     const p = pickPrice(c);
@@ -1856,7 +1963,7 @@ async function binderAddPage(btn) {
     for (let i = 0; i < picks.length; i++) {
       const cell = picks[i], c = cell.chosen;
       const photo = cell.blob ? await Store.savePhoto(cell.blob) : null;
-      recs.push({ id: "card_" + uid(), ...cardFromCatalogue(c), finish: "normal", qty: 1, condition: null, photo, read: { name: "", number: cell.number || "", setCode: "", confidence: "binder page" }, addedAt: now + i, price: null });
+      recs.push({ id: "card_" + uid(), ...cardFromCatalogue(c), finish: "normal", qty: 1, condition: null, photo, read: { name: "", number: cell.number || "", setCode: "", confidence: "binder page" }, addedAt: now + i, price: null, ...(addToColl() ? { coll: addToColl() } : {}) });
     }
     await Store.putMany(recs);
     binder.added += recs.length;
@@ -1873,7 +1980,7 @@ function resetAdd() { Object.assign(add, { manualName: null, manualNum: null, bl
 resetAdd();
 const CONDS = [["", "Not set"], ["9", "Near Mint, looks perfect (about 9)"], ["8", "Near Mint, tiny flaw (about 8)"], ["6", "Lightly played (about 6)"], ["4", "Moderately played (about 4)"], ["2", "Heavily played or damaged (about 2)"]];
 const condOptions = g => CONDS.map(([v, l]) => `<option value="${v}" ${String(g ?? "") === v ? "selected" : ""}>${l}</option>`).join("");
-function openAdd() { stopScan(); binderClear(); Object.assign(Scan, { skipKey: "", added: 0, lastName: "" }); resetAdd(); renderAdd(); $("#addSheet").showModal(); }
+function openAdd() { if (collById(view.coll)) setAddTo(view.coll); stopScan(); binderClear(); Object.assign(Scan, { skipKey: "", added: 0, lastName: "" }); resetAdd(); renderAdd(); $("#addSheet").showModal(); }
 $("#addSheet").addEventListener("close", () => { stopScan(); binderClear(); });
 function renderAdd() {
   const b = $("#addBody");
@@ -1892,6 +1999,7 @@ function renderAdd() {
       <div class="seg" role="group" aria-label="Scan mode"><button type="button" data-smode="auto" aria-pressed="${!scanShotMode()}">Continuous</button><button type="button" data-smode="shot" aria-pressed="${scanShotMode()}">Single shot</button></div>
       <p class="muted" id="scanHint" role="status" style="margin:0">${Scan.added ? esc(scanAddedMsg()) : "Starting the camera…"}</p>
       <div class="field"><label for="langSel">Card language</label><select id="langSel">${LANGS.filter(x => x[0] !== "other").map(([k, l]) => `<option value="${k}" ${k === scanLang() ? "selected" : ""}>${l}</option>`).join("")}</select><p class="src" id="langNote" style="margin:4px 0 0"></p></div>
+      ${addToField()}
       <div class="scan-ctl">
         <label class="inline-check"><input type="checkbox" id="scanAuto" ${autoFrameOn() ? "checked" : ""}> Find the card and fit the frame to it</label>
         <label>Frame size <input type="range" id="scanSize" min="30" max="100" step="1" value="${Math.round(ScanPrefs.size)}"></label>
@@ -1904,7 +2012,7 @@ function renderAdd() {
         <button class="btn" type="button" id="scanTorch" aria-pressed="${Scan.torch}">${Scan.torch ? "Flash on" : "Flash off"}</button>
         <button class="btn" type="button" id="scanBack">${Scan.added ? "Done" : "Back"}</button>
       </div>`;
-    placeFrame(); scanPointer($("#scanBox")); wireLang(b);
+    placeFrame(); scanPointer($("#scanBox")); wireLang(b); wireAddTo(b);
     $("#scanSize").addEventListener("input", e => { ScanPrefs.size = Number(e.target.value); placeFrame(); Scan.userMoved = Date.now(); });
     $("#scanAuto").addEventListener("change", e => { ScanPrefs.auto = e.target.checked; saveScanPrefs(); if (!ScanPrefs.auto) $("#scanBox").classList.remove("found"); });
     $("#scanSize").addEventListener("change", saveScanPrefs);
@@ -1940,6 +2048,7 @@ function renderAdd() {
       <p class="muted" style="margin:0">${aiOn ? "Photograph the front of the card, flat and filling most of the frame. Claude reads the name, number and set, then checks condition." : ocrUsable() ? "Photograph the front of the card, flat, straight on and filling most of the frame. The app reads the collector number at the bottom to find it." : "Add a photo of the front, then find the card by name or number."}</p>
       ${add.err ? `<p class="add-err" role="alert">${esc(add.err)}</p>` : ""}
       <div class="field"><label for="langSel">Card language</label><select id="langSel">${LANGS.map(([k, l]) => `<option value="${k}" ${k === scanLang() ? "selected" : ""}>${l}</option>`).join("")}</select><p class="src" id="langNote" style="margin:4px 0 0"></p></div>
+      ${addToField()}
       <div class="pickers">
         ${live ? `<button class="picker wide" type="button" id="scanBtn">Scan with camera<small>Hold the card up and the number is read live</small></button>` : ""}
         <label class="picker">Take photo<small>Camera</small><input id="camIn" type="file" accept="image/*" capture="environment"></label>
@@ -1952,7 +2061,7 @@ function renderAdd() {
     if (live) $("#scanBtn").addEventListener("click", startScan);
     if (binderOk) $("#binIn").addEventListener("change", e => { if (e.target.files && e.target.files.length) binderStart(e.target.files); });
     $("#skipPhoto").addEventListener("click", () => { add.step = "search"; renderAdd(); });
-    wireLang(b);
+    wireLang(b); wireAddTo(b);
     return;
   }
   const shot = add.url ? `<img src="${esc(add.url)}" alt="Your photo">` : `<div class="ph">No photo</div>`;
@@ -2156,7 +2265,7 @@ async function saveAdd(c, btn) {
   btn.textContent = "Saving…";
   try {
     const photo = add.photoBlob ? await Store.savePhoto(add.photoBlob) : null;
-    const rec = { id: "card_" + uid(), ...cardFromCatalogue(c), finish: add.finish, qty: add.qty, condition: add.cond || null, photo, read: add.read ? { name: add.read.name || "", number: add.read.number || "", setCode: add.read.setCode || "", confidence: add.read.confidence || "" } : null, addedAt: Date.now(), price: c.manual ? ownPrice(c.ownPrice, add.finish) : null };
+    const rec = { id: "card_" + uid(), ...cardFromCatalogue(c), finish: add.finish, qty: add.qty, condition: add.cond || null, photo, read: add.read ? { name: add.read.name || "", number: add.read.number || "", setCode: add.read.setCode || "", confidence: add.read.confidence || "" } : null, addedAt: Date.now(), price: c.manual ? ownPrice(c.ownPrice, add.finish) : null, ...(addToColl() ? { coll: addToColl() } : {}) };
     if (c.lang) Cat.byId.set(c.id, c);
     await Store.put(rec);
     add.saving = false;
@@ -2169,7 +2278,7 @@ async function saveAdd(c, btn) {
       return;
     }
     $("#addSheet").close();
-    toast(`Added ${c.name}`);
+    toast(`Added ${c.name}` + (collById(rec.coll) ? ` to ${collById(rec.coll).name}` : ""));
   } catch (e) {
     add.saving = false; btn.textContent = label;
     add.err = e && e.code === "quota_exceeded" ? "Your collection store is full." : "That card couldn't be saved. Try again."; renderAdd();
@@ -2302,6 +2411,7 @@ async function renderDetail() {
       <div class="field"><label for="dFin">Finish</label><select id="dFin">${FINISHES.map(([k, l]) => `<option value="${k}" ${k === c.finish ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="field"><label for="dQty">Copies</label><input id="dQty" type="number" min="1" max="999" value="${c.qty || 1}"></div>
     </div>
+    <div class="field"><label for="dColl">Binder</label><select id="dColl">${collOptions(collById(c.coll) ? c.coll : "")}</select></div>
     ${slabHtml(c.condition) || `<p class="muted" style="margin:0">No condition estimate for this card.</p>`}
     ${!c.condition || c.condition.source !== "photo" ? `<div class="field"><label for="dCond">Condition (your call)</label><select id="dCond">${condOptions(c.condition && c.condition.grade)}</select></div>` : ""}
     ${photo ? `<div><button class="btn small" type="button" id="dCen">${c.condition && c.condition.centeringMeasured ? "Measure centering again" : "Measure centering"}</button></div>` : ""}
@@ -2315,6 +2425,12 @@ async function renderDetail() {
     ${confirmDelete ? `<div class="confirm"><b>Remove ${esc(c.name)} from your collection?</b><span class="muted">This deletes its photo too.</span><div class="actions"><button class="btn danger small" type="button" id="dDelYes">Remove card</button><button class="btn small" type="button" id="dDelNo">Keep it</button></div></div>`
       : `<div><button class="btn danger small" type="button" id="dDel">Remove from collection</button></div>`}`;
   $("#dFin").addEventListener("change", e => Store.put({ ...c, finish: e.target.value }).then(renderDetail));
+  $("#dColl").addEventListener("change", e => {
+    const move = id => { const n = { ...c }; if (id) n.coll = id; else delete n.coll; return Store.put(n).then(renderDetail); };
+    if (e.target.value !== "__new") return move(e.target.value);
+    e.target.value = collById(c.coll) ? c.coll : "";
+    openCollSheet("new", null, id => { if (id) move(id); });
+  });
   $("#dQty").addEventListener("change", e => Store.put({ ...c, qty: Math.max(1, Math.min(999, parseInt(e.target.value) || 1)) }).then(renderDetail));
   const dc = $("#dCond"); if (dc) dc.addEventListener("change", e => Store.put({ ...c, condition: { ...(c.condition || {}), source: "manual", grade: e.target.value ? Number(e.target.value) : null } }).then(renderDetail));
   const dcen = $("#dCen"); if (dcen) dcen.addEventListener("click", () => { detailCentering = true; renderDetail(); });
@@ -2366,7 +2482,7 @@ async function renderGallery(rows) {
   const both = Prefs.pics === "both", arr = view.arranging;
   g.classList.toggle("duo", both); g.classList.toggle("arranging", arr);
   renderGTools(rows);
-  if (!rows.length) { g.innerHTML = Store.cards.length ? `<li class="muted" style="grid-column:1/-1;padding:16px 4px">No cards match these filters.</li>` : ""; return; }
+  if (!rows.length) { g.innerHTML = Store.cards.length ? `<li class="muted" style="grid-column:1/-1;padding:16px 4px">${emptyMsg()}</li>` : ""; return; }
   const prior = new Map([...g.querySelectorAll("[data-gimg]")].map(el => [el.dataset.gimg + (el.dataset.duo || ""), el.innerHTML]));
   const seen = new Set([...g.querySelectorAll(".gcard.in")].map(el => el.dataset.id));
   g.innerHTML = rows.map((c, i) => {
@@ -2941,7 +3057,7 @@ function csvCell(v) {
   if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = "'" + s; // keep spreadsheets from reading a cell as a formula
   return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
-const CSV_COLS = ["Name", "Set", "Set code", "Number", "Set total", "Series", "Rarity", "Finish", "Copies", "Condition (your call)", "Estimated grade", "Centering", "Price each (USD)", "Value (USD)", "Price is for", "Price date", "Price source", "Catalogue ID", "Added", "Language"];
+const CSV_COLS = ["Name", "Set", "Set code", "Number", "Set total", "Series", "Rarity", "Finish", "Copies", "Condition (your call)", "Estimated grade", "Centering", "Price each (USD)", "Value (USD)", "Price is for", "Price date", "Price source", "Catalogue ID", "Added", "Language", "Binder"];
 function collectionCSV(rows) {
   const out = [CSV_COLS.map(csvCell).join(",")];
   for (const c of rows) {
@@ -2951,7 +3067,7 @@ function collectionCSV(rows) {
       c.finish ? finishLabel(c.finish) : "", q, yours, g == null ? "" : g, cond.centering || "",
       p ? p.value.toFixed(2) : "", p ? (p.value * q).toFixed(2) : "", p ? finishLabel(p.finish) : "",
       c.price && c.price.updated ? String(c.price.updated).slice(0, 10).replace(/\//g, "-") : "", c.price ? c.price.source || "" : "",
-      c.cardId || "", c.addedAt ? new Date(c.addedAt).toISOString().slice(0, 10) : "", langName(c.lang || "en")].map(csvCell).join(","));
+      c.cardId || "", c.addedAt ? new Date(c.addedAt).toISOString().slice(0, 10) : "", langName(c.lang || "en"), (collById(c.coll) || {}).name || ""].map(csvCell).join(","));
   }
   return "﻿" + out.join("\r\n") + "\r\n";
 }
@@ -2971,6 +3087,8 @@ async function saveFile(blob, name) {
 function shownNote(rows) {
   const copies = list => list.reduce((n, c) => n + (c.qty || 1), 0);
   const n = copies(rows), all = copies(Store.cards);
+  const one = collById(view.coll);
+  if (one && !view.q.trim() && !view.set && !view.rarity) return `the ${n} card${n === 1 ? "" : "s"} in ${one.name}`;
   return n < all ? `the ${n} of your ${all} cards that your filters show` : `all ${n} of your card${n === 1 ? "" : "s"}`;
 }
 
@@ -3030,7 +3148,7 @@ async function collectionImages(rows, onProgress, mode) {
     ["#ff8a8a", "#ffd36b", "#8be0a4", "#7cc8ff", "#c8a2ff", "#ff9bd2"].forEach((col, i, a) => holo.addColorStop(i / (a.length - 1), col));
     ctx.fillStyle = holo; ctx.fillRect(M, M + HEAD - 26, cw - 2 * M, 4);
     ctx.textBaseline = "alphabetic"; ctx.fillStyle = "#ffffff"; ctx.font = `800 44px ${display}`;
-    ctx.fillText("Poke Lab", M, M + 42);
+    ctx.fillText(collById(view.coll) ? fitText(ctx, "Poke Lab · " + collById(view.coll).name, cw - 2 * M) : "Poke Lab", M, M + 42);
     ctx.font = `500 20px ${body}`; ctx.fillStyle = "rgba(255,255,255,.72)";
     const meta = `${count} card${count === 1 ? "" : "s"} · ${sets.size} set${sets.size === 1 ? "" : "s"} · ${usd(total)}${nPages > 1 ? ` · picture ${pi + 1} of ${nPages}` : ""}`;
     ctx.fillText(fitText(ctx, meta, cw - 2 * M - 160), M, M + 74);
@@ -3125,7 +3243,8 @@ async function makeBackup(onProgress) {
     onProgress && onProgress(n, withPhoto);
   }
   const decks = Store.decks.map(d => JSON.parse(JSON.stringify(d)));
-  const data = { app: "poke-lab", kind: "backup", version: 1, savedAt: new Date().toISOString(), cards, decks, photos };
+  const colls = Store.colls.map(b => JSON.parse(JSON.stringify(b)));
+  const data = { app: "poke-lab", kind: "backup", version: 1, savedAt: new Date().toISOString(), cards, decks, colls, photos };
   return { blob: new Blob([JSON.stringify(data)], { type: "application/json" }), cards: cards.length, decks: decks.length, photos: saved, missing: withPhoto - saved };
 }
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -3138,9 +3257,12 @@ async function restoreBackup(file) {
   const fresh = data.cards.filter(c => c && typeof c === "object" && /^card_[A-Za-z0-9]{1,64}$/.test(c.id || "") && typeof c.name === "string" && !have.has(c.id));
   const already = data.cards.filter(c => c && have.has(c.id)).length;
   const decks = (Array.isArray(data.decks) ? data.decks : []).filter(d => d && typeof d === "object" && /^deck_[A-Za-z0-9]{1,64}$/.test(d.id || "") && Array.isArray(d.cards) && !haveDecks.has(d.id));
-  if (!fresh.length && !decks.length) { toast("Everything in that backup is already in your binder."); return; }
+  const haveColls = new Set(Store.colls.map(b => b.id));
+  const colls = (Array.isArray(data.colls) ? data.colls : []).filter(b => b && typeof b === "object" && /^coll_[A-Za-z0-9]{1,64}$/.test(b.id || "") && typeof b.name === "string" && b.name.trim() && !haveColls.has(b.id));
+  if (!fresh.length && !decks.length && !colls.length) { toast("Everything in that backup is already in your binder."); return; }
   const add = [];
   try {
+    for (const b of colls) await Store.putColl({ id: b.id, name: b.name.trim().slice(0, 40), createdAt: Number(b.createdAt) || Date.now() });
     for (const raw of fresh) {
       const c = JSON.parse(JSON.stringify(raw)); c.photo = null;
       const src = raw.photo && raw.photo.kind === "file" && typeof raw.photo.id === "string" ? photos[raw.photo.id] : null;
@@ -3154,14 +3276,14 @@ async function restoreBackup(file) {
     for (const d of decks) await Store.putDeck(JSON.parse(JSON.stringify(d)));
     Notices.hide("restore");
     const unpriced = add.filter(c => !c.price); if (unpriced.length) priceNew(unpriced);
-    const parts = [fresh.length && plural(fresh.length, "card"), decks.length && plural(decks.length, "deck")].filter(Boolean).join(" and ");
+    const parts = [fresh.length && plural(fresh.length, "card"), decks.length && plural(decks.length, "deck"), colls.length && plural(colls.length, "binder")].filter(Boolean).join(", ").replace(/, ([^,]*)$/, " and $1");
     toast(`Restored ${parts}` + (already ? `. ${plural(already, "card")} were already here.` : ""));
   } catch (e) {
     Notices.show("restore", `The restore stopped after ${plural(add.length, "card")}. Load the same file again to finish; cards already restored won't be added twice.`);
   }
 }
 $("#bkSave").addEventListener("click", async e => {
-  if (!Store.cards.length && !Store.decks.length) { toast("Nothing to back up yet."); return; }
+  if (!Store.cards.length && !Store.decks.length && !Store.colls.length) { toast("Nothing to back up yet."); return; }
   const btn = e.currentTarget, note = $("#bkNote"); btn.disabled = true; note.dataset.busy = "1";
   try {
     note.textContent = "Packing your cards…";
@@ -3261,6 +3383,11 @@ $(".tabs").addEventListener("keydown", e => {
 addEventListener("hashchange", () => setTab(location.hash.slice(1), true));
 $("#q").addEventListener("input", e => { view.q = e.target.value; renderList(); });
 $("#fSet").addEventListener("change", e => { view.set = e.target.value; renderList(); });
+$("#fColl").addEventListener("change", e => { setCollView(e.target.value); view.set = ""; view.rarity = ""; renderList(); });
+$("#collNew").addEventListener("click", () => openCollSheet("new", null, id => { if (id) { setCollView(id); setAddTo(id); renderList(); } }));
+$("#collRen").addEventListener("click", () => { const b = collById(view.coll); if (b) openCollSheet("rename", b); });
+$("#collDel").addEventListener("click", () => { const b = collById(view.coll); if (b) openCollSheet("delete", b); });
+try { const v = localStorage.getItem("pokelab-coll"); if (v) view.coll = v; } catch (x) {}
 $("#fRarity").addEventListener("change", e => { view.rarity = e.target.value; renderList(); });
 $("#fSort").addEventListener("change", e => { setSort(e.target.value); if (view.sort !== "manual") view.arranging = false; renderList(); });
 try { const s = localStorage.getItem("pokelab-sort"); if (s && SORTS[s]) { view.sort = s; $("#fSort").value = s; } } catch (x) {}
