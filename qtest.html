@@ -344,6 +344,9 @@ function flattenQuad(src, sw, sh, q, w, h) {
   return out;
 }
 
+function shrinkTo(src,w,h){let c=src,cw=src.width,ch=src.height;
+ while(cw/2>=w*1.2){const n=document.createElement("canvas");n.width=Math.round(cw/2);n.height=Math.round(ch/2);const g=n.getContext("2d");g.imageSmoothingQuality="high";g.drawImage(c,0,0,n.width,n.height);c=n;cw=n.width;ch=n.height;}
+ const o=document.createElement("canvas");o.width=w;o.height=h;const g=o.getContext("2d");g.imageSmoothingQuality="high";g.drawImage(c,0,0,w,h);return o;}
 const cards=["ja/SV/SV8a/010","en/sv/sv03.5/006","ja/SV/SV2a/151","en/swsh/swsh12.5/GG01","zh-tw/SV/SV9/001"];
 const load=u=>new Promise((r,j)=>{const i=new Image();i.crossOrigin="anonymous";i.onload=()=>r(i);i.onerror=()=>r(null);i.src=u;});
 function bg(ctx,W,H,kind,seed){let x=seed;const rnd=()=>(x=(x*16807)%2147483647)/2147483647;
@@ -369,7 +372,7 @@ for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.
   const q=loc.map(([x,y])=>({x:cx+x*Math.cos(rot)-y*Math.sin(rot),y:cy+x*Math.sin(rot)+y*Math.cos(rot)}));
   drawQuad(ctx,img,q,t%2);
   const sm=document.createElement("canvas");sm.width=120;sm.height=160;sm.getContext("2d").drawImage(cv,0,0,120,160);
-  const hi=document.createElement("canvas");hi.width=240;hi.height=320;hi.getContext("2d").drawImage(cv,0,0,240,320);
+  const hi=shrinkTo(cv,240,320);
   const r0=findCard(sm);
   const t0=performance.now(),r=findQuad(hi),ms=performance.now()-t0;tt+=ms;n++;
   const want=q.map(p=>({x:p.x/W*100,y:p.y/H*100}));
