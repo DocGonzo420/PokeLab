@@ -89,7 +89,7 @@ function findQuad(cv) {
   blur(jxx); blur(jyy); blur(jxy);
   for (let i = 0; i < W * H; i++) ang[i] = 0.5 * Math.atan2(2 * jxy[i], jxx[i] - jyy[i]);
   /* thin each edge to one pixel, keeping only real edges */
-  const T = 14, edge = new Uint8Array(W * H), step = new Float32Array(W * H);
+  const T = 9, edge = new Uint8Array(W * H), step = new Float32Array(W * H);
   for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
     const i = y * W + x, m = mag[i]; if (m < T) continue;
     const a = ang[i], ox = Math.round(Math.cos(a)), oy = Math.round(Math.sin(a));
@@ -100,7 +100,7 @@ function findQuad(cv) {
     if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0 || x1 >= W || x2 >= W || y1 >= H || y2 >= H) continue;
     const p1 = (y1 * W + x1) * 4, p2 = (y2 * W + x2) * 4;
     const st = Math.max(Math.abs(d[p1] - d[p2]), Math.abs(d[p1 + 1] - d[p2 + 1]), Math.abs(d[p1 + 2] - d[p2 + 2]));
-    if (st >= 22) { edge[i] = 1; step[i] = st; }
+    if (st >= 12) { edge[i] = 1; step[i] = st; }
   }
   /* line finder: each edge pixel votes for lines through it at about its own direction */
   const NT = 180, D = Math.ceil(Math.hypot(W, H)), NR = 2 * D + 1, acc = new Float32Array(NT * NR);
@@ -108,7 +108,7 @@ function findQuad(cv) {
   for (let t = 0; t < NT; t++) { COS[t] = Math.cos(t * Math.PI / NT); SIN[t] = Math.sin(t * Math.PI / NT); }
   for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
     const i = y * W + x; if (!edge[i]) continue;
-    let t0 = Math.round(ang[i] * NT / Math.PI); const w = Math.min(1, step[i] / 70);
+    let t0 = Math.round(ang[i] * NT / Math.PI); const w = Math.min(1, step[i] / 40);
     for (let k = -3; k <= 3; k++) {
       const t = ((t0 + k) % NT + NT) % NT, rf = x * COS[t] + y * SIN[t] + D, r = Math.floor(rf), f = rf - r, v = w * (k === 0 ? 1 : k * k === 1 ? 0.8 : 0.5);
       acc[t * NR + r] += v * (1 - f); acc[t * NR + r + 1] += v * f;
