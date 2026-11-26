@@ -3810,6 +3810,7 @@ Store.onChange(() => {
    return B.map((v, i) => v / A[i][i]);
  }
  
+ { const P0=new URLSearchParams(location.search); if(P0.get('shot')){ let o={}; try{o=JSON.parse(localStorage.getItem('pokelab-scan')||'{}');}catch(e){} if(o.mode!=='shot'){o.mode='shot';localStorage.setItem('pokelab-scan',JSON.stringify(o));location.reload();return;} } }
  const P=new URLSearchParams(location.search), card=P.get("card")||"en/sv/sv03.5/006", rot=+(P.get("rot")||15), tilt=+(P.get("tilt")||0.08), bgk=+(P.get("bg")||0);
  const W=1080,H=1440, cv=document.createElement("canvas"); cv.width=W; cv.height=H; const ctx=cv.getContext("2d");
  window.FAKE={ready:false};
