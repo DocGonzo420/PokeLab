@@ -3,6 +3,8 @@ src=sys.argv[1]; out=sys.argv[2]
 sets=json.load(open(src+'/sets/en.json'))
 sets.sort(key=lambda s:(s['releaseDate'],s['id']))
 rar=[];sup=[]
+# type letters (as in deck.json) and the first National Pokédex number, for the Type filter and Pokédex sort
+TL={'Grass':'G','Fire':'R','Water':'W','Lightning':'L','Psychic':'P','Fighting':'F','Darkness':'D','Metal':'M','Fairy':'Y','Dragon':'N','Colorless':'C'}
 def idx(lst,v):
     if v not in lst: lst.append(v)
     return lst.index(v)
@@ -18,6 +20,8 @@ for si,s in enumerate(sets):
         if c['id']!=f"{s['id']}-{c['number']}": row.append(c['id'])
         else: row.append(0)
         row.append(im)
+        row.append(''.join(TL.get(t,'C') for t in c.get('types') or []))
+        row.append((c.get('nationalPokedexNumbers') or [0])[0])
         C.append(row)
 json.dump({'v':'2026-11-08','sets':S,'rarities':rar,'supertypes':sup,'cards':C},open(out,'w'),separators=(',',':'),ensure_ascii=False)
 print(len(S),len(C))

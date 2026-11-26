@@ -88,6 +88,20 @@ input[type=search],input[type=text],input[type=number],select{width:100%;min-wid
 .chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid currentColor;white-space:nowrap}
 .chip.t-common{color:var(--tier-common)}.chip.t-rare{color:var(--tier-rare)}.chip.t-ultra{color:var(--tier-ultra)}.chip.t-secret{color:var(--tier-secret)}
 .chip.grade{color:var(--ink);border-color:var(--line);background:var(--sunk)}
+.row .tick,.gtick{display:none}
+.selecting .row{grid-template-columns:22px 56px 1fr auto}
+.selecting .row.duo{grid-template-columns:22px auto 1fr auto}
+.selecting .row .tick{display:block;width:22px;height:22px;border-radius:50%;border:2px solid var(--muted);box-sizing:border-box}
+.row.picked{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.row.picked .tick,.gcard.picked .gtick{background:var(--ink);border-color:var(--ink);box-shadow:inset 0 0 0 4px var(--surface)}
+.selecting .gtick{display:block;position:absolute;top:8px;left:8px;z-index:4;width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:rgb(0 0 0 / .4);box-sizing:border-box}
+.gcard.picked .gbtn{outline:3px solid var(--ink);outline-offset:2px}
+.bulkbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:7;width:min(560px,calc(100% - 24px));box-sizing:border-box;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 24px rgb(0 0 0 / .3);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.bulkbar[hidden]{display:none}
+.bulkbar .bhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.bulkbar .bhead b{margin-right:auto;font-size:14px}
+.bulkbar .acts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+body.selecting main.wrap{padding-bottom:150px}
 .row .price{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
 .row .price b{font:700 17px/1 var(--f-display);font-stretch:85%;font-variant-numeric:tabular-nums}
 .row .price span{font-size:11px;color:var(--muted)}
@@ -377,14 +391,16 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
   <div id="notices"></div>
   <div class="filters" id="filters">
     <div class="exports colls"><label class="k" for="fColl">Binder</label><select id="fColl"><option value="">All cards</option></select><button class="btn small" type="button" id="collNew">New binder</button><button class="btn small ghost" type="button" id="collRen" hidden>Rename</button><button class="btn small ghost" type="button" id="collDel" hidden>Delete</button></div>
-    <div class="field search"><label for="q">Search your cards</label><input id="q" type="search" placeholder="Name, set or number" autocomplete="off"></div>
+    <div class="field search"><label for="q">Search your cards</label><input id="q" type="search" placeholder="Name, set, number or #25 for Pokédex" autocomplete="off"></div>
     <div class="field"><label for="fSet">Set</label><select id="fSet"><option value="">All sets</option></select></div>
     <div class="field"><label for="fRarity">Rarity</label><select id="fRarity"><option value="">All rarities</option></select></div>
+    <div class="field"><label for="fType">Type</label><select id="fType"><option value="">All types</option></select></div>
     <div class="field"><label for="fSort">Sort</label>
-      <select id="fSort"><option value="value">Highest value</option><option value="low">Lowest value</option><option value="recent">Recently added</option><option value="rarity">Rarest first</option><option value="grade">Best condition</option><option value="set">Set and number</option><option value="name">Name</option><option value="manual">My order</option></select></div>
+      <select id="fSort"><option value="value">Highest value</option><option value="low">Lowest value</option><option value="recent">Recently added</option><option value="rarity">Rarest first</option><option value="grade">Best condition</option><option value="set">Set and number</option><option value="name">Name, A to Z</option><option value="namez">Name, Z to A</option><option value="dex">Pokédex number</option><option value="manual">My order</option></select></div>
     <div class="field"><label for="fPics">Pictures</label><select id="fPics"><option value="both">Both</option><option value="mine">My photos</option><option value="catalogue">Catalogue images</option></select></div>
     <div class="exports"><span class="k">Download</span><button class="btn small" type="button" id="dlCsv">Spreadsheet (CSV)</button><button class="btn small" type="button" id="dlImg">Collection image</button><span class="muted" id="dlNote" role="status"></span></div>
     <div class="exports"><span class="k">Backup</span><button class="btn small" type="button" id="bkSave">Save backup</button><button class="btn small" type="button" id="bkLoad">Restore backup</button><span class="muted" id="bkNote" role="status"></span></div>
+    <div class="exports"><span class="k">Edit</span><button class="btn small" type="button" id="selOn">Select cards</button><span class="muted">Move, edit or remove several at once</span></div>
   </div>
   <input type="file" id="bkIn" accept=".json,application/json" hidden>
   <ul class="list" id="list"></ul>
@@ -400,6 +416,7 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
   </div>
 </main>
 
+<div class="bulkbar" id="bulkBar" role="region" aria-label="Selected cards" hidden></div>
 <button class="fab" id="fab" type="button"><span class="dot" aria-hidden="true"></span>Add a card</button>
 
 <dialog class="sheet" id="addSheet" aria-labelledby="addTitle">
@@ -409,6 +426,12 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
   </div>
 </dialog>
 
+<dialog class="sheet" id="bulkSheet" aria-labelledby="bulkTitle">
+  <div class="sheet-inner">
+    <div class="sheet-head"><h2 id="bulkTitle">Selected cards</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
+    <div class="sheet-body" id="bulkBody"></div>
+  </div>
+</dialog>
 <dialog class="sheet" id="collSheet" aria-labelledby="collTitle">
   <div class="sheet-inner">
     <div class="sheet-head"><h2 id="collTitle">New binder</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
@@ -465,7 +488,7 @@ async function loadCatalogue() {
   Cat.sets = d.sets.map(s => ({ id: s[0], name: s[1], series: s[2], total: s[3], code: s[4], released: s[5], n: norm(s[1]) }));
   Cat.cards = d.cards.map(c => {
     const set = Cat.sets[c[0]];
-    const card = { set, number: c[1], name: c[2], rarity: Cat.rar[c[3]], supertype: Cat.sup[c[4]], id: c[5] || (set.id + "-" + c[1]), im: c[6] };
+    const card = { set, number: c[1], name: c[2], rarity: Cat.rar[c[3]], supertype: Cat.sup[c[4]], id: c[5] || (set.id + "-" + c[1]), im: c[6], ty: c[7] || "", dex: c[8] || 0 };
     card.n = norm(card.name); card.nn = normNum(card.number);
     return card;
   });
@@ -925,6 +948,7 @@ async function priceFromAsia(card) {
   out.source = "TCGdex (Cardmarket)";
   if (card.lang !== "ja" && (out.eur || hasUsd(out))) out.ref = "the Japanese printing";
   const rar = info && info.rarity; if (rar && rar !== "None") out.rarity = rar;
+  if (info) out.meta = { types: (info.types || []).map(t => TYPE_LETTER[t] || "").join(""), dex: (Array.isArray(info.dexId) && info.dexId[0]) || 0, kind: kindOf(info.category) };
   return out;
 }
 const hasUsd = p => p && p.usd && Object.keys(p.usd).length;
@@ -1082,6 +1106,17 @@ const Store = {
     if (this.mode === "cloud") { await this.col.doc(coll.id).delete(); return; }
     this.colls = this.colls.filter(b => b.id !== coll.id);
     if (this.mode === "local") await this.tx("colls", "readwrite", s => s.delete(coll.id));
+    this.emit();
+  },
+  async removeMany(cards) {
+    if (this.mode === "cloud") { for (const c of cards) await this.remove(c); return; }
+    const ids = new Set(cards.map(c => c.id));
+    this.cards = this.cards.filter(c => !ids.has(c.id));
+    if (this.mode === "local") {
+      await this.tx("cards", "readwrite", s => { for (const id of ids) s.delete(id); });
+      const ph = cards.filter(c => c.photo && c.photo.kind === "local");
+      if (ph.length) await this.tx("photos", "readwrite", s => { for (const c of ph) s.delete(c.photo.id); });
+    }
     this.emit();
   },
   async remove(card) {
@@ -1950,7 +1985,21 @@ function imgTag(src, alt, cls = "") {
 }
 
 /* ---------- collection view ---------- */
-const view = { q: "", coll: "", set: "", rarity: "", sort: "value", tab: "binder", arranging: false, focusAfter: null };
+const view = { q: "", coll: "", set: "", rarity: "", type: "", sort: "value", tab: "binder", arranging: false, focusAfter: null, selecting: false, sel: new Set() };
+/* ---------- type and Pokédex number: English cards (and Simplified Chinese, through their English printing)
+   from the catalogue; Japanese, Korean and Traditional Chinese from TCGdex, saved on the card when its price loads ---------- */
+const TYPE_NAMES = { G: "Grass", R: "Fire", W: "Water", L: "Lightning", P: "Psychic", F: "Fighting", D: "Darkness", M: "Metal", Y: "Fairy", N: "Dragon", C: "Colorless", T: "Trainer", E: "Energy" };
+const TYPE_ORDER = "GRWLPFDMYNCTE";
+const TYPE_LETTER = Object.fromEntries(Object.entries(TYPE_NAMES).map(([k, v]) => [v, k]));
+const kindOf = s => !s ? "" : /^pok/i.test(s) ? "P" : /^trainer/i.test(s) ? "T" : /^energy/i.test(s) ? "E" : "";
+function cardMeta(c) {
+  if (c.manual) return { types: "", dex: 0, kind: "" };
+  const cat = !c.lang ? Cat.byId.get(c.cardId) : c.lang === "zh-cn" && c.twinId ? Cat.byId.get(c.twinId) : null;
+  if (cat) return { types: cat.ty || "", dex: cat.dex || 0, kind: kindOf(cat.supertype) };
+  return { types: c.types || "", dex: c.dex || 0, kind: c.kind || kindOf(c.supertype) };
+}
+function typeMatch(c, v) { const m = cardMeta(c); return v === "T" || v === "E" ? m.kind === v : m.types.includes(v); }
+const sortName = c => (c.lang && c.nameEn) || c.name;
 const photoCache = new Map();
 function cardFromCatalogue(c) {
   if (c.lang) {
@@ -2045,10 +2094,15 @@ function renderTotals(cards) {
   $("#totalMeta").textContent = bits.join(" · ");
 }
 function renderFilters(cards) {
-  const setSel = $("#fSet"), rSel = $("#fRarity");
-  const sets = new Map(); const rars = new Set();
-  for (const c of cards) { sets.set(c.setId, c); if (c.rarity) rars.add(c.rarity); }
-  const keepS = setSel.value, keepR = rSel.value;
+  const setSel = $("#fSet"), rSel = $("#fRarity"), tSel = $("#fType");
+  const sets = new Map(); const rars = new Set(); const types = new Set();
+  for (const c of cards) {
+    sets.set(c.setId, c); if (c.rarity) rars.add(c.rarity);
+    const m = cardMeta(c); for (const t of m.types) types.add(t); if (m.kind === "T" || m.kind === "E") types.add(m.kind);
+  }
+  const keepS = setSel.value, keepR = rSel.value, keepT = tSel.value;
+  tSel.innerHTML = `<option value="">All types</option>` + [...TYPE_ORDER].filter(t => types.has(t)).map(t => `<option value="${t}">${TYPE_NAMES[t]}</option>`).join("");
+  tSel.value = types.has(keepT) ? keepT : ""; view.type = tSel.value;
   setSel.innerHTML = `<option value="">All sets</option>` + [...sets.values()].sort((a, b) => String(b.released).localeCompare(String(a.released))).map(c => `<option value="${esc(c.setId)}">${esc(c.setName)}${c.setCode ? " (" + esc(c.setCode) + ")" : ""}</option>`).join("");
   rSel.innerHTML = `<option value="">All rarities</option>` + [...rars].sort().map(r => `<option>${esc(r)}</option>`).join("");
   setSel.value = sets.has(keepS) ? keepS : ""; rSel.value = rars.has(keepR) ? keepR : "";
@@ -2057,8 +2111,9 @@ function renderFilters(cards) {
 /* the cards the binder and gallery show, after search, filters and sort */
 function visibleRows() {
   const q = norm(view.q), qn = normName(view.q);
-  const rows = Store.cards.filter(c => inColl(c, view.coll) && (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) &&
-    (!view.q.trim() || (q && (norm(c.name) + " " + norm(c.nameEn) + " " + norm(c.setName) + " " + norm(c.setCode) + " " + norm(c.number)).includes(q)) || (qn && (normName(c.name) + normName(c.setName)).includes(qn))));
+  const dexQ = view.q.trim().match(/^#\s*0*(\d{1,4})$/);
+  const rows = Store.cards.filter(c => inColl(c, view.coll) && (!view.set || c.setId === view.set) && (!view.rarity || c.rarity === view.rarity) && (!view.type || typeMatch(c, view.type)) &&
+    (!view.q.trim() || (dexQ ? cardMeta(c).dex === Number(dexQ[1]) : (q && (norm(c.name) + " " + norm(c.nameEn) + " " + norm(c.setName) + " " + norm(c.setCode) + " " + norm(c.number)).includes(q)) || (qn && (normName(c.name) + normName(c.setName)).includes(qn)))));
   return rows.sort(SORTS[view.sort] || SORTS.value);
 }
 /* sort presets, plus "manual": the order you arranged by hand (cards added since then come first, newest first) */
@@ -2073,9 +2128,87 @@ const SORTS = {
   rarity: (a, b) => (TIER_RANK[tier(b.rarity)] || 0) - (TIER_RANK[tier(a.rarity)] || 0) || sortVal(b) - sortVal(a),
   grade: (a, b) => sortGrade(b) - sortGrade(a) || sortVal(b) - sortVal(a),
   set: (a, b) => String(b.released).localeCompare(String(a.released)) || (parseInt(a.number) || 0) - (parseInt(b.number) || 0),
-  name: (a, b) => a.name.localeCompare(b.name),
+  name: (a, b) => sortName(a).localeCompare(sortName(b)) || SORTS.set(a, b),
+  namez: (a, b) => sortName(b).localeCompare(sortName(a)) || SORTS.set(a, b),
+  dex: (a, b) => (cardMeta(a).dex || 1e5) - (cardMeta(b).dex || 1e5) || sortName(a).localeCompare(sortName(b)) || SORTS.set(a, b),
   manual: (a, b) => { const pa = manualPos(a), pb = manualPos(b); if (pa == null && pb == null) return (b.addedAt || 0) - (a.addedAt || 0); if (pa == null) return -1; if (pb == null) return 1; return pa - pb; }
 };
+/* ---------- select mode: pick several cards, then move, edit or remove them together ---------- */
+function toggleSel(id) { if (view.sel.has(id)) view.sel.delete(id); else view.sel.add(id); paintSel(); }
+function paintSel() {
+  document.querySelectorAll("#list [data-open]").forEach(el => { const on = view.sel.has(el.dataset.open); el.classList.toggle("picked", on); el.setAttribute("aria-pressed", on); });
+  document.querySelectorAll("#gallery .gcard").forEach(li => { const on = view.sel.has(li.dataset.id); li.classList.toggle("picked", on); const b = li.querySelector("[data-open]"); if (b) b.setAttribute("aria-pressed", on); });
+  renderBulkBar();
+}
+function renderBulkBar() {
+  const bar = $("#bulkBar"), on = view.selecting && view.tab !== "decks" && Store.cards.length > 0;
+  document.body.classList.toggle("selecting", on); bar.hidden = !on;
+  $("#selOn").textContent = view.selecting ? "Done selecting" : "Select cards"; $("#selOn").setAttribute("aria-pressed", view.selecting);
+  if (!on) return;
+  const n = view.sel.size, shown = visibleRows(), allShown = shown.length > 0 && shown.every(c => view.sel.has(c.id));
+  const dis = n ? "" : " disabled";
+  bar.innerHTML = `<div class="bhead"><b role="status">${n ? `${n} card${n === 1 ? "" : "s"} selected` : "Tap cards to select them"}</b>
+      ${allShown ? "" : `<button class="btn small" type="button" id="selAll"${shown.length ? "" : " disabled"}>Select all ${shown.length}</button>`}
+      ${n ? `<button class="btn small ghost" type="button" id="selNone">Clear</button>` : ""}
+      <button class="btn small primary" type="button" id="selDone">Done</button></div>
+    <div class="acts"><button class="btn small" type="button" data-bulk="move"${dis}>Move to binder</button><button class="btn small" type="button" data-bulk="edit"${dis}>Edit</button><button class="btn small danger" type="button" data-bulk="remove"${dis}>Remove</button></div>`;
+}
+function openBulk(kind) {
+  const cards = Store.cards.filter(c => view.sel.has(c.id)), n = cards.length; if (!n) return;
+  const word = `${n} card${n === 1 ? "" : "s"}`, copies = cards.reduce((t, c) => t + (c.qty || 1), 0);
+  const body = $("#bulkBody"), sheet = $("#bulkSheet"); let html;
+  if (kind === "move") {
+    $("#bulkTitle").textContent = `Move ${word}`;
+    html = `<div class="field"><label for="bkColl">Move to</label><select id="bkColl">${collOptions(collById(view.coll) ? view.coll : "")}</select></div>
+      <p class="muted" style="margin:0">Pick No binder to take them out of their binders. They stay in your collection either way.</p>`;
+  } else if (kind === "edit") {
+    $("#bulkTitle").textContent = `Edit ${word}`;
+    html = `<p class="muted" style="margin:0">Only what you change here changes. Anything left as Keep stays as it is on each card.</p>
+      <div class="field"><label for="bkFin">Finish</label><select id="bkFin"><option value="">Keep each card's finish</option>${FINISHES.map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select></div>
+      <div class="field"><label for="bkQty">Copies</label><input id="bkQty" type="number" min="1" max="999" inputmode="numeric" placeholder="Keep each card's count"></div>
+      <div class="field"><label for="bkCond">Condition</label><select id="bkCond"><option value="keep">Keep each card's condition</option>${CONDS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select></div>
+      <p class="coll-err" id="bkErr" role="alert" hidden></p>`;
+  } else {
+    $("#bulkTitle").textContent = `Remove ${word}`;
+    html = `<p style="margin:0">Remove <b>${word}</b>${copies > n ? ` (${copies} copies)` : ""} from your collection? This deletes their photos too, and it can't be undone. Save a backup first if you might want them back.</p>`;
+  }
+  const label = kind === "move" ? "Move" : kind === "edit" ? "Save changes" : `Remove ${word}`;
+  body.innerHTML = html + `<div class="actions"><button class="btn ${kind === "remove" ? "danger" : "primary"}" type="button" id="bkGo">${esc(label)}</button><button class="btn" type="button" id="bkNo">${kind === "remove" ? "Keep them" : "Cancel"}</button></div>`;
+  $("#bkNo").addEventListener("click", () => sheet.close());
+  if (kind === "move") $("#bkColl").addEventListener("change", e => {
+    if (e.target.value !== "__new") return;
+    e.target.value = ""; sheet.close();
+    openCollSheet("new", null, id => { if (id) bulkMove(cards, id); });
+  });
+  $("#bkGo").addEventListener("click", async e => {
+    if (kind === "move") { e.currentTarget.disabled = true; sheet.close(); return bulkMove(cards, $("#bkColl").value); }
+    if (kind === "remove") {
+      e.currentTarget.disabled = true;
+      await Store.removeMany(cards); for (const c of cards) photoCache.delete(c.id);
+      view.sel.clear(); sheet.close(); renderList(); toast(`Removed ${word}`); return;
+    }
+    const fin = $("#bkFin").value, qtyRaw = $("#bkQty").value.trim(), cond = $("#bkCond").value;
+    const qty = qtyRaw ? Math.max(1, Math.min(999, parseInt(qtyRaw) || 1)) : 0;
+    if (!fin && !qty && cond === "keep") { const er = $("#bkErr"); er.textContent = "Change at least one thing first."; er.hidden = false; return; }
+    e.currentTarget.disabled = true;
+    await Store.putMany(cards.map(c => {
+      const x = { ...c };
+      if (fin) x.finish = fin;
+      if (qty) x.qty = qty;
+      if (cond !== "keep") x.condition = { ...(c.condition || {}), source: "manual", grade: cond ? Number(cond) : null };
+      return x;
+    }));
+    sheet.close(); toast(`Updated ${word}`);
+  });
+  sheet.showModal();
+}
+async function bulkMove(cards, id) {
+  const b = collById(id);
+  await Store.putMany(cards.map(c => { const x = { ...c }; if (b) x.coll = b.id; else delete x.coll; return x; }));
+  const n = cards.length, word = `${n} card${n === 1 ? "" : "s"}`;
+  view.sel.clear(); renderList();
+  toast(b ? `Moved ${word} to ${b.name}` : `Took ${word} out of their binders`);
+}
 function setSort(v) { view.sort = v; $("#fSort").value = v; try { localStorage.setItem("pokelab-sort", v); } catch (x) {} }
 /* save a new order for the cards on screen; cards your filters hide keep their places */
 async function saveManualOrder(visibleIds) {
@@ -2087,12 +2220,14 @@ async function saveManualOrder(visibleIds) {
 async function renderList() {
   const cards = collCards();
   renderCollBar(); renderTotals(cards); renderFilters(cards);
+  for (const id of view.sel) if (!Store.cards.some(c => c.id === id)) view.sel.delete(id);
+  renderBulkBar();
   const has = Store.cards.length > 0; const tab = view.tab;
   if (tab === "decks") { view.arranging = false; $("#gtools").hidden = true; $("#filters").hidden = true; $("#empty").hidden = true; $("#fab").hidden = true; $("#list").hidden = true; $("#gallery").hidden = true; $("#decks").hidden = false; return renderDecks(); }
   $("#decks").hidden = true; $("#list").hidden = tab !== "binder"; $("#gallery").hidden = tab !== "gallery";
   if (tab !== "gallery") view.arranging = false;
   $("#gtools").hidden = tab !== "gallery" || !has;
-  $("#filters").hidden = !has; $("#empty").hidden = has; $("#fab").hidden = !has;
+  $("#filters").hidden = !has; $("#empty").hidden = has; $("#fab").hidden = !has || view.selecting;
   const rows = visibleRows();
   if (tab === "gallery") return renderGallery(rows);
   const list = $("#list");
@@ -2101,12 +2236,13 @@ async function renderList() {
   list.innerHTML = rows.map(c => {
     const p = pickPrice(c);
     const g = c.condition && c.condition.grade;
-    return `<li><button class="row${both ? " duo" : ""}" type="button" data-open="${esc(c.id)}">
-      <span class="thumb${both ? " duo" : ""}" data-photo="${esc(c.id)}"></span>
+    const picked = view.selecting && view.sel.has(c.id), dex = view.sort === "dex" && cardMeta(c).dex;
+    return `<li><button class="row${both ? " duo" : ""}${picked ? " picked" : ""}" type="button" data-open="${esc(c.id)}"${view.selecting ? ` aria-pressed="${picked}"` : ""}>
+      <span class="tick" aria-hidden="true"></span><span class="thumb${both ? " duo" : ""}" data-photo="${esc(c.id)}"></span>
       <span class="main">
         <span class="name">${esc(c.name)}${(c.qty || 1) > 1 ? ` <span class="muted">×${c.qty}</span>` : ""}</span>
         <span class="setline">${esc(c.setName)} · <span class="mono">${esc(c.setCode || c.setId)} ${esc(c.number)}/${esc(c.printedTotal || "?")}</span></span>
-        <span class="chips">${c.lang ? `<span class="chip">${esc(langName(c.lang))}</span>` : ""}${c.rarity ? `<span class="chip t-${tier(c.rarity)}">${esc(c.rarity)}</span>` : ""}${g ? `<span class="chip grade">Est. ${esc(g)}</span>` : ""}</span>
+        <span class="chips">${dex ? `<span class="chip">#${dex}</span>` : ""}${c.lang ? `<span class="chip">${esc(langName(c.lang))}</span>` : ""}${c.rarity ? `<span class="chip t-${tier(c.rarity)}">${esc(c.rarity)}</span>` : ""}${g ? `<span class="chip grade">Est. ${esc(g)}</span>` : ""}</span>
       </span>
       <span class="price">${p ? `<b>${usd(p.value)}</b><span>${c.price && c.price.own ? "Your price" : esc(finishLabel(p.finish))}</span>` : `<b class="muted">—</b><span>No price</span>`}</span>
     </button></li>`;
@@ -2124,7 +2260,7 @@ async function refreshPrices(force, only) {
   if (PriceState.busy) return; PriceState.busy = true;
   try {
     if ((only || Store.cards).some(c => c.lang)) { if (await loadFX().catch(() => false)) Store.emit(); }
-    const due = (only || Store.cards).filter(c => c.cardId && !c.manual && c.lang !== "zh-cn" && (force || !c.price || !c.price.fetchedAt || c.price.v !== 2 || Date.now() - c.price.fetchedAt > STALE));
+    const due = (only || Store.cards).filter(c => c.cardId && !c.manual && c.lang !== "zh-cn" && (force || !c.price || !c.price.fetchedAt || c.price.v !== 2 || Date.now() - c.price.fetchedAt > STALE || (c.lang && c.kind == null)));
     if (!due.length) return;
     const { prices, reached } = await fetchPrices(due);
     PriceState.tried = true;
@@ -2138,7 +2274,7 @@ async function refreshPrices(force, only) {
     PriceState.blocked = false; Notices.hide("prices");
     for (const c of due) {
       const p = prices.get(c.cardId);
-      if (p) { const { rarity, ...price } = p; await Store.put({ ...c, price, rarity: c.rarity || rarity || "" }); }
+      if (p) { const { rarity, meta, ...price } = p; await Store.put({ ...c, price, rarity: c.rarity || rarity || "", ...(c.lang ? { kind: "", ...(meta || {}) } : {}) }); }
     }
   } finally { PriceState.busy = false; }
 }
@@ -2871,14 +3007,15 @@ async function renderGallery(rows) {
     const label = `${c.name}, ${c.setName} ${c.number}${c.lang ? ", " + langName(c.lang) : ""}${p ? ", " + usd(p.value) : ""}${c.rarity ? ", " + c.rarity : ""}`;
     const tag = arr ? "div" : "button"; const key = c.id + (both ? "1" : "");
     const moves = arr ? `<span class="gmove"><button type="button" data-mv="-1" aria-label="Move ${esc(c.name)} earlier"${i === 0 ? " disabled" : ""}>‹</button><button type="button" data-mv="1" aria-label="Move ${esc(c.name)} later"${i === rows.length - 1 ? " disabled" : ""}>›</button></span>` : "";
-    return `<li class="gcard t-${tier(c.rarity)}" data-id="${esc(c.id)}" style="--i:${i % 8}">
-      <${tag} class="gbtn" ${arr ? `role="group"` : `type="button" data-open="${esc(c.id)}"`} aria-label="${esc(label)}">
+    const picked = view.selecting && view.sel.has(c.id), dex = view.sort === "dex" && cardMeta(c).dex;
+    return `<li class="gcard t-${tier(c.rarity)}${picked ? " picked" : ""}" data-id="${esc(c.id)}" style="--i:${i % 8}">
+      <${tag} class="gbtn" ${arr ? `role="group"` : `type="button" data-open="${esc(c.id)}"`}${view.selecting && !arr ? ` aria-pressed="${picked}"` : ""} aria-label="${esc((dex ? "Pokédex " + dex + ", " : "") + label)}"><span class="gtick" aria-hidden="true"></span>
         <span class="gimg" data-gimg="${esc(c.id)}"${both ? ` data-duo="1"` : ""}>${prior.get(key) || `<span class="ph">${esc(c.name)}</span>`}</span>${moves}
         <span class="gsheen" aria-hidden="true"></span>
         ${q > 1 ? `<span class="gbadge qty" aria-hidden="true">×${q}</span>` : ""}
         ${g8 ? `<span class="gbadge grade" aria-hidden="true">Est. ${esc(g8)}</span>` : ""}
         <span class="gov" aria-hidden="true">
-          <span class="gname">${esc(c.name)}</span>
+          <span class="gname">${dex ? `#${dex} ` : ""}${esc(c.name)}</span>
           <span class="gset">${esc(c.setCode || c.setId)} ${esc(c.number)}/${esc(c.printedTotal || "?")} · ${esc(c.setName)}</span>
           <span class="grow"><span class="gval${p ? "" : " none"}">${p ? usd(p.value) : "No price"}</span>${c.rarity ? `<span class="grar">${esc(c.rarity)}</span>` : ""}</span>
         </span>
@@ -2969,10 +3106,10 @@ async function startArrange() {
   if (view.sort !== "manual") {
     const fresh = !Store.cards.some(c => typeof c.pos === "number");
     const from = SORTS[view.sort] || SORTS.value;
-    setSort("manual"); view.arranging = true;
+    setSort("manual"); view.arranging = true; view.selecting = false; view.sel.clear();
     if (fresh) { await Store.putMany([...Store.cards].sort(from).map((c, i) => ({ ...c, pos: i }))); return; }
   }
-  view.arranging = true; renderList();
+  view.arranging = true; view.selecting = false; view.sel.clear(); renderList();
 }
 function wireArrange() {
   const g = $("#gallery");
@@ -3022,7 +3159,7 @@ function wireGalleryTilt() {
 }
 
 /* ---------- deck data (gameplay facts for playable cards) ---------- */
-const TYPE_NAMES = { G: "Grass", R: "Fire", W: "Water", L: "Lightning", P: "Psychic", F: "Fighting", D: "Darkness", M: "Metal", Y: "Fairy", N: "Dragon", C: "Colorless" };
+/* TYPE_NAMES is shared with the Type filter (defined with the filters) */
 const ROLE_INFO = {
   D: ["Draw", "Draws you new cards"], S: ["Pokémon search", "Finds Pokémon from your deck"], W: ["Switching", "Gets your Active Pokémon out"],
   G: ["Gust", "Pulls up your opponent's Benched Pokémon"], R: ["Recovery", "Gets cards back from your discard pile"], E: ["Energy", "Finds or attaches Energy"], C: ["Evolution", "Lets Basics evolve straight to Stage 2"], U: ["Supporter search", "Finds the Supporter you need"]
@@ -3743,8 +3880,17 @@ document.addEventListener("error", e => {
 }, true);
 document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => b.closest("dialog").close()));
 $("#fab").addEventListener("click", openAdd); $("#emptyAdd").addEventListener("click", openAdd);
-$("#list").addEventListener("click", e => { const r = e.target.closest("[data-open]"); if (r) openDetail(r.dataset.open); });
-$("#gallery").addEventListener("click", e => { const r = e.target.closest("[data-open]"); if (r) openDetail(r.dataset.open); });
+$("#list").addEventListener("click", e => { const r = e.target.closest("[data-open]"); if (!r) return; if (view.selecting) toggleSel(r.dataset.open); else openDetail(r.dataset.open); });
+$("#gallery").addEventListener("click", e => { const r = e.target.closest("[data-open]"); if (!r) return; if (view.selecting) toggleSel(r.dataset.open); else openDetail(r.dataset.open); });
+$("#selOn").addEventListener("click", () => { view.selecting = !view.selecting; view.arranging = false; if (!view.selecting) view.sel.clear(); renderList(); });
+$("#bulkBar").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.id === "selDone") { view.selecting = false; view.sel.clear(); renderList(); return; }
+  if (b.id === "selAll") { for (const c of visibleRows()) view.sel.add(c.id); paintSel(); return; }
+  if (b.id === "selNone") { view.sel.clear(); paintSel(); return; }
+  if (b.dataset.bulk) openBulk(b.dataset.bulk);
+});
+$("#fType").addEventListener("change", e => { view.type = e.target.value; renderList(); });
 wireGalleryTilt(); wireArrange();
 $("#fPics").value = Prefs.pics;
 $("#fPics").addEventListener("change", e => { Prefs.pics = e.target.value; try { localStorage.setItem("pokelab-pics2", Prefs.pics); } catch (x) {} renderList(); });
