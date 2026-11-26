@@ -3792,6 +3792,22 @@ Store.onChange(() => {
 <script>
 /* TEST ONLY: a fake back camera that shows a real card, turned and tilted, on a table */
 (function(){
+ function boxToQuad(w, h, q) {
+   const src = [[0, 0], [w, 0], [w, h], [0, h]], A = [], B = [];
+   for (let i = 0; i < 4; i++) {
+     const [x, y] = src[i], u = q[i].x, v = q[i].y;
+     A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); B.push(u);
+     A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); B.push(v);
+   }
+   for (let c = 0; c < 8; c++) {
+     let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+     [A[c], A[p]] = [A[p], A[c]]; [B[c], B[p]] = [B[p], B[c]];
+     const piv = A[c][c]; if (Math.abs(piv) < 1e-12) return null;
+     for (let r = 0; r < 8; r++) if (r !== c) { const f = A[r][c] / piv; if (!f) continue; for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k]; B[r] -= f * B[c]; }
+   }
+   return B.map((v, i) => v / A[i][i]);
+ }
+ 
  const P=new URLSearchParams(location.search), card=P.get("card")||"en/sv/sv03.5/006", rot=+(P.get("rot")||15), tilt=+(P.get("tilt")||0.08), bgk=+(P.get("bg")||0);
  const W=1080,H=1440, cv=document.createElement("canvas"); cv.width=W; cv.height=H; const ctx=cv.getContext("2d");
  window.FAKE={ready:false};
@@ -3817,7 +3833,7 @@ Store.onChange(() => {
  navigator.mediaDevices.getUserMedia=async()=>vis.captureStream(10);
  const dbg=document.createElement("pre");dbg.id="dbg";dbg.style.cssText="position:fixed;left:0;bottom:0;z-index:99999;background:#fff;color:#000;font:11px monospace;margin:0;max-width:100vw;white-space:pre-wrap";
  setInterval(()=>{if(!dbg.isConnected)document.body.appendChild(dbg);const v=document.getElementById("scanVideo"),b=document.getElementById("scanBox");
-  dbg.textContent="DBG fake "+JSON.stringify(window.FAKE)+" video "+(v?v.videoWidth+"x"+v.videoHeight:"-")+" box "+(b?b.clientWidth+"x"+b.clientHeight+" cls "+b.className+" ar "+b.style.aspectRatio:"-")+" quad "+(typeof Scan!=="undefined"&&Scan.quad?JSON.stringify(Scan.quad.pts.map(p=>[+p.x.toFixed(1),+p.y.toFixed(1)])):"-");},500);
+  dbg.textContent="DBG fake "+JSON.stringify(window.FAKE)+" video "+(v?v.videoWidth+"x"+v.videoHeight:"-")+" box "+(b?b.clientWidth+"x"+b.clientHeight+" cls "+b.className+" ar "+b.style.aspectRatio:"-")+" quad "+((document.querySelector("#scanQuad .q-card")||{getAttribute:()=>"-"}).getAttribute("d"))+" hint "+((document.getElementById("scanHint")||{}).textContent||"");},500);
 })();
 </script>
 </body>
