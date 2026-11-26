@@ -210,11 +210,13 @@ for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.
   drawQuad(ctx,img,q,t%2);
   const sm=document.createElement("canvas");sm.width=120;sm.height=160;sm.getContext("2d").drawImage(cv,0,0,120,160);
   const hi=document.createElement("canvas");hi.width=360;hi.height=480;hi.getContext("2d").drawImage(cv,0,0,360,480);
+  const r0=findQuad(sm);
   const t0=performance.now(),r=findQuad(sm,hi),ms=performance.now()-t0;tt+=ms;n++;
   const want=q.map(p=>({x:p.x/W*100,y:p.y/H*100}));
+  const err0=r0?Math.max(...r0.pts.map((p,i)=>Math.hypot(p.x-want[i].x,p.y-want[i].y))):99;
   const err=r?Math.max(...r.pts.map((p,i)=>Math.hypot(p.x-want[i].x,p.y-want[i].y))):99;
   const good=err<2.5;if(good)ok++;
-  lines.push(`${c} t${t} ${good?"OK ":"BAD"} rot ${(rot*180/Math.PI).toFixed(0)} tilt ${tilt} got deg ${r?r.deg.toFixed(1):"-"} maxerr ${err.toFixed(2)}% ${ms.toFixed(0)}ms`);
+  lines.push(`${c} t${t} ${good?"OK ":"BAD"} rot ${(rot*180/Math.PI).toFixed(0)} tilt ${tilt} got deg ${r?r.deg.toFixed(1):"-"} rect ${err0.toFixed(2)} fit ${err.toFixed(2)}% ${ms.toFixed(0)}ms`);
   if(!good||t==4){const g=cv.getContext("2d");g.strokeStyle="#0f0";g.lineWidth=3;if(r){g.beginPath();r.pts.forEach((p,i)=>{const X=p.x*W/100,Y=p.y*H/100;i?g.lineTo(X,Y):g.moveTo(X,Y);});g.closePath();g.stroke();}
    cv.style.width="150px";document.getElementById("pics").appendChild(cv);
    if(r){const f=flattenQuad(cv,W,H,r.pts.map(p=>({x:p.x*W/100,y:p.y*H/100})),252,352);if(f){f.style.width="110px";document.getElementById("pics").appendChild(f);}}}
