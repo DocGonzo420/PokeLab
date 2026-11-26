@@ -418,7 +418,7 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
     <div class="field"><label for="fSort">Sort</label>
       <select id="fSort"><option value="value">Highest value</option><option value="low">Lowest value</option><option value="recent">Recently added</option><option value="rarity">Rarest first</option><option value="grade">Best condition</option><option value="set">Set and number</option><option value="name">Name, A to Z</option><option value="namez">Name, Z to A</option><option value="dex">Pokédex number</option><option value="manual">My order</option></select></div>
     <div class="field"><label for="fPics">Pictures</label><select id="fPics"><option value="both">Both</option><option value="mine">My photos</option><option value="catalogue">Catalogue images</option></select></div>
-    <div class="exports"><span class="k">Download</span><button class="btn small" type="button" id="dlCsv">Spreadsheet (CSV)</button><button class="btn small" type="button" id="dlImg">Collection image</button><span class="muted" id="dlNote" role="status"></span></div>
+    <div class="exports"><span class="k">Download</span><button class="btn small" type="button" id="dlCsv">Spreadsheet (CSV)</button><button class="btn small" type="button" id="dlRep">Report (PDF)</button><button class="btn small" type="button" id="dlImg">Collection image</button><span class="muted" id="dlNote" role="status"></span></div>
     <div class="exports"><span class="k">Backup</span><button class="btn small" type="button" id="bkSave">Save backup</button><button class="btn small" type="button" id="bkLoad">Restore backup</button><span class="muted" id="bkNote" role="status"></span></div>
     <div class="exports"><span class="k">Edit</span><button class="btn small" type="button" id="selOn">Select cards</button><span class="muted">Move, edit or remove several at once</span></div>
   </div>
@@ -463,6 +463,13 @@ body[data-tab="gallery"] .wrap{max-width:1200px}
   <div class="sheet-inner">
     <div class="sheet-head"><h2 id="imgTitle">Collection picture</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
     <div class="sheet-body" id="imgBody"></div>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="repSheet" aria-labelledby="repTitle">
+  <div class="sheet-inner">
+    <div class="sheet-head"><h2 id="repTitle">Collection report</h2><button class="close" type="button" data-close aria-label="Close">×</button></div>
+    <div class="sheet-body" id="repBody"></div>
   </div>
 </dialog>
 
@@ -877,6 +884,13 @@ function pickPrice(card) {
     if (e) return { finish: "cardmarket", value: e * FX.rate, eur: e };
   }
   return null;
+}
+/* where to compare a card's price: its TCGplayer page (or a search there) and its eBay sold listings */
+function compQuery(c) { return c.lang ? `${c.nameEn || c.name} ${c.setCode} ${c.number} ${langName(c.lang).replace(/ \(.*\)/, "")}` : `${c.name} ${c.number}/${c.printedTotal || ""} ${c.setName}`; }
+const ebaySold = q => `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(q)}&LH_Sold=1&LH_Complete=1`;
+const tcgSearch = q => `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(q)}`;
+function compLinks(c) {
+  return { ebay: ebaySold(compQuery(c)), tcgp: (c.price && c.price.url) || tcgSearch(c.lang ? (c.nameEn ? c.nameEn : c.setCode + " " + c.number) : c.name + " " + c.number) };
 }
 const FX = { rate: null, at: 0 };
 try { const o = JSON.parse(localStorage.getItem("pokelab-fx") || "null"); if (o && o.rate > 0) Object.assign(FX, o); } catch (x) {}
@@ -3025,9 +3039,8 @@ async function renderDetail() {
   if (c.manual) priceHtml = `<div class="field"><label for="dOwn">Your price each (USD)</label><input id="dOwn" type="number" min="0" step="0.01" inputmode="decimal" value="${p && p.own && mine ? mine.value : ""}" placeholder="e.g. 4.50"></div>
       <p class="src" style="margin:0">No free source prices these cards, so this is the value you set. Sold listings on eBay are a good guide.</p>`;
   else if (p && p.ref && priceHtml) priceHtml += `<p class="src" style="margin:8px 0 0">This is Cardmarket's price for ${esc(p.ref)} of this card. No free source prices ${esc(langName(c.lang))} cards, so it isn't counted in your total.</p>`;
-  const searchName = c.lang ? `${c.nameEn || c.name} ${c.setCode} ${c.number} ${langName(c.lang).replace(/ \(.*\)/, "")}` : `${c.name} ${c.number}/${c.printedTotal || ""} ${c.setName}`;
-  const ebay = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(searchName + " PSA")}&LH_Sold=1&LH_Complete=1`;
-  const tcgp = (p && p.url) || `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(c.lang ? (c.nameEn ? c.nameEn : c.setCode + " " + c.number) : c.name + " " + c.number)}`;
+  const ebay = ebaySold(compQuery(c) + " PSA");
+  const tcgp = compLinks(c).tcgp;
 
   b.innerHTML = `
     <div class="detail-hero">${(() => {
@@ -3694,19 +3707,36 @@ function csvCell(v) {
   if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = "'" + s; // keep spreadsheets from reading a cell as a formula
   return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
-const CSV_COLS = ["Name", "Set", "Set code", "Number", "Set total", "Series", "Rarity", "Finish", "Copies", "Condition (your call)", "Estimated grade", "Centering", "Price each (USD)", "Value (USD)", "Price is for", "Price date", "Price source", "Catalogue ID", "Added", "Language", "Binder"];
-function collectionCSV(rows) {
-  const out = [CSV_COLS.map(csvCell).join(",")];
-  for (const c of rows) {
-    const p = pickPrice(c), q = c.qty || 1, cond = c.condition || {}, g = cond.grade;
-    const yours = cond.source === "manual" && g != null ? ((CONDS.find(x => x[0] === String(g)) || [])[1] || "") : "";
-    out.push([c.name, c.setName, c.setCode || "", c.number, c.printedTotal || "", c.series || "", c.rarity || "",
-      c.finish ? finishLabel(c.finish) : "", q, yours, g == null ? "" : g, cond.centering || "",
-      p ? p.value.toFixed(2) : "", p ? (p.value * q).toFixed(2) : "", p ? finishLabel(p.finish) : "",
-      c.price && c.price.updated ? String(c.price.updated).slice(0, 10).replace(/\//g, "-") : "", c.price ? c.price.source || "" : "",
-      c.cardId || "", c.addedAt ? new Date(c.addedAt).toISOString().slice(0, 10) : "", langName(c.lang || "en"), (collById(c.coll) || {}).name || ""].map(csvCell).join(","));
+const CSV_COLS = ["Name", "Set", "Set code", "Number", "Set total", "Series", "Rarity", "Finish", "Copies", "Condition (your call)", "Estimated grade", "Centering", "Price each (USD)", "Value (USD)", "Price is for", "Price date", "Price source", "TCGplayer market (USD)", "TCGplayer low (USD)", "TCGplayer mid (USD)", "TCGplayer high (USD)", "Cardmarket trend (EUR)", "Cardmarket 30-day average (EUR)", "eBay sold listings", "TCGplayer page", "Catalogue ID", "Added", "Language", "Binder"];
+/* missing: catalogue cards to list as not owned, which makes the spreadsheet a checklist */
+function collectionCSV(rows, missing) {
+  const two = n => typeof n === "number" ? n.toFixed(2) : "";
+  const check = !!(missing && missing.length);
+  const items = rows.map(c => ({ c, set: c.setName, number: c.number }));
+  if (check) {
+    items.push(...missing.map(x => ({ x, set: x.set.name, number: x.number })));
+    items.sort((a, b) => String(a.set).localeCompare(String(b.set)) || String(a.number).localeCompare(String(b.number), undefined, { numeric: true }));
   }
-  return "﻿" + out.join("\r\n") + "\r\n";
+  const out = [(check ? ["Have", ...CSV_COLS] : CSV_COLS).map(csvCell).join(",")];
+  for (const it of items) {
+    let vals;
+    if (it.c) {
+      const c = it.c, p = pickPrice(c), q = c.qty || 1, cond = c.condition || {}, g = cond.grade, cp = compPrices(c), lk = compLinks(c);
+      const yours = cond.source === "manual" && g != null ? ((CONDS.find(x => x[0] === String(g)) || [])[1] || "") : "";
+      vals = [c.name, c.setName, c.setCode || "", c.number, c.printedTotal || "", c.series || "", c.rarity || "",
+        c.finish ? finishLabel(c.finish) : "", q, yours, g == null ? "" : g, cond.centering || "",
+        p ? p.value.toFixed(2) : "", p ? (p.value * q).toFixed(2) : "", p ? finishLabel(p.finish) : "",
+        c.price && c.price.updated ? String(c.price.updated).slice(0, 10).replace(/\//g, "-") : "", c.price ? c.price.source || "" : "",
+        two(cp.market), two(cp.low), two(cp.mid), two(cp.high), two(cp.cmTrend), two(cp.cmAvg30), lk.ebay, lk.tcgp,
+        c.cardId || "", c.addedAt ? new Date(c.addedAt).toISOString().slice(0, 10) : "", langName(c.lang || "en"), (collById(c.coll) || {}).name || ""];
+    } else {
+      const x = it.x, row = { Name: x.name, Set: x.set.name, "Set code": x.set.code || "", Number: x.number, "Set total": x.set.total || "", Series: x.set.series || "", Rarity: x.rarity || "", Copies: 0,
+        "eBay sold listings": ebaySold(`${x.name} ${x.number}/${x.set.total || ""} ${x.set.name}`), "TCGplayer page": tcgSearch(x.name + " " + x.number), "Catalogue ID": x.id, Language: "English" };
+      vals = CSV_COLS.map(k => row[k] == null ? "" : row[k]);
+    }
+    out.push((check ? [it.c ? "Yes" : "No", ...vals] : vals).map(csvCell).join(","));
+  }
+  return "\ufeff" + out.join("\r\n") + "\r\n";
 }
 /* Inside Claude a page can't download directly; the viewer confirms each file instead. Resolves true when saved. */
 async function saveFile(blob, name) {
@@ -3841,6 +3871,253 @@ $("#dlCsv").addEventListener("click", async () => {
   const rows = visibleRows(); if (!rows.length) { toast("No cards to download."); return; }
   if (await saveFile(new Blob([collectionCSV(rows)], { type: "text/csv;charset=utf-8" }), `poke-lab-collection-${today()}.csv`))
     toast(`Downloaded ${shownNote(rows)} as a spreadsheet`);
+});
+/* ---------- collection report: the cards shown, grouped by set like a checklist, as a PDF or a spreadsheet ---------- */
+const PDF_JS = ["https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"];
+let pdfLib = null;
+function loadPdfLib() {
+  const ready = () => { const J = window.jspdf && window.jspdf.jsPDF; return J && J.API && J.API.autoTable ? J : null; };
+  if (ready()) return Promise.resolve(ready());
+  if (!pdfLib) pdfLib = (async () => {
+    const add = src => new Promise((res, rej) => {
+      const sc = document.createElement("script"); sc.src = src; sc.onload = res; sc.onerror = () => rej(new Error("pdf script"));
+      document.head.append(sc);
+    });
+    if (!(window.jspdf && window.jspdf.jsPDF)) await add(PDF_JS[0]);
+    if (!ready()) await add(PDF_JS[1]);
+    if (!ready() && typeof window.applyPlugin === "function" && window.jspdf) window.applyPlugin(window.jspdf.jsPDF);
+    const J = ready(); if (!J) throw new Error("pdf missing");
+    return J;
+  })().catch(e => { pdfLib = null; throw e; });
+  return pdfLib;
+}
+const ReportPrefs = { missing: false, paper: "letter" };
+try { Object.assign(ReportPrefs, JSON.parse(localStorage.getItem("pokelab-report") || "{}")); } catch (x) {}
+const saveReportPrefs = () => { try { localStorage.setItem("pokelab-report", JSON.stringify(ReportPrefs)); } catch (x) {} };
+const byNumber = (a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true, sensitivity: "base" });
+/* Groups the cards shown by set, newest set first. With missing on, each English set also lists the catalogue cards
+   that no copy in this binder covers, so the report reads as a checklist. */
+function reportGroups(rows, withMissing) {
+  const groups = new Map();
+  for (const c of rows) {
+    const k = c.setId || c.setName || "?";
+    if (!groups.has(k)) groups.set(k, { key: k, name: c.setName || "Unknown set", code: c.setCode || "", series: c.series || "", released: c.released || "", printed: c.printedTotal || "", lang: c.lang || "", owned: [], missing: [], catTotal: 0, have: 0 });
+    groups.get(k).owned.push(c);
+  }
+  for (const g of groups.values()) {
+    const cat = !g.lang && Cat.ready ? Cat.cards.filter(x => x.set.id === g.key) : [];
+    if (cat.length) { g.catTotal = cat.length; g.released = g.released || cat[0].set.released || ""; g.printed = g.printed || cat[0].set.total || ""; g.series = g.series || cat[0].set.series || ""; }
+    const inBinder = Store.cards.filter(c => inColl(c, view.coll) && (c.setId || c.setName) === g.key);
+    const have = new Set(inBinder.map(c => normNum(c.number)));
+    g.have = cat.length ? cat.filter(x => have.has(x.nn)).length : have.size;
+    if (withMissing && cat.length) g.missing = cat.filter(x => !have.has(x.nn) && (!view.rarity || x.rarity === view.rarity));
+    g.owned.sort((a, b) => byNumber(a, b) || String(a.finish || "").localeCompare(String(b.finish || "")));
+    g.missing.sort(byNumber);
+    g.copies = g.owned.reduce((n, c) => n + (c.qty || 1), 0);
+    g.value = g.owned.reduce((n, c) => { const p = pickPrice(c); return n + (p ? p.value * (c.qty || 1) : 0); }, 0);
+  }
+  return [...groups.values()].sort((a, b) => String(b.released).localeCompare(String(a.released)) || a.name.localeCompare(b.name));
+}
+/* the comparison prices behind a card's value: TCGplayer's market, low, mid and high for the finish counted, and Cardmarket's in euros */
+function compPrices(c) {
+  const p = c.price, mine = pickPrice(c), out = { market: null, low: null, mid: null, high: null, cmTrend: null, cmAvg30: null };
+  if (!p || p.ref) return out;
+  const f = (mine && mine.finish) || c.finish;
+  const u = p.usd && (p.usd[f] || (c.finish && p.usd[c.finish]));
+  if (u) for (const k of ["market", "low", "mid", "high"]) if (typeof u[k] === "number") out[k] = u[k];
+  if (p.eur) { if (typeof p.eur.trend === "number") out.cmTrend = p.eur.trend; if (typeof p.eur.avg30 === "number") out.cmAvg30 = p.eur.avg30; }
+  return out;
+}
+const condShort = c => {
+  const cond = c.condition || {}, g = cond.grade;
+  if (g == null || g === "") return "";
+  if (cond.source === "manual") return ({ 9: "NM", 8: "NM-", 6: "LP", 4: "MP", 2: "HP" })[g] || String(g);
+  return "~" + g;
+};
+/* The PDF's built-in font covers Western European letters only, so other scripts fall back to the English name */
+function pdfText(s) {
+  return String(s == null ? "" : s).replace(/[‘’ʼ]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, "-").replace(/…/g, "...")
+    .replace(/♀/g, " (F)").replace(/♂/g, " (M)").replace(/[★☆]/g, "*").replace(/δ/g, "Delta").replace(/[^\x20-\x7E\xA0-\xFF]/g, "").replace(/\s{2,}/g, " ").trim();
+}
+/* a set whose name is in another script goes by its code and language instead */
+const CJK = /[\u1100-\u11FF\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/;
+const pdfSet = (name, code, lang) => CJK.test(String(name || "")) || !pdfText(name) ? [pdfText(code), lang ? langName(lang) : ""].filter(Boolean).join(" ") || "Set" : pdfText(name);
+/* collector numbers padded like the card: 001/165 */
+const pdfNum = (n, total) => { const t = String(total || ""), s = pdfText(n); return /^\d+$/.test(s) && /^\d+$/.test(t) ? s.padStart(Math.max(3, t.length), "0") + "/" + t : s + (t ? "/" + t : ""); };
+const pdfFinish = k => pdfText(finishLabel(k)).replace(/, from euros/, "");
+const pdfName = c => { const raw = c.lang ? (c.nameEn || c.name) : c.name; return !CJK.test(String(raw || "")) && pdfText(raw) || `${pdfText(c.setCode)} ${pdfText(c.number)}`.trim() || "Card"; };
+const money = n => typeof n === "number" && isFinite(n) ? "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
+
+function reportPDF(J, rows, groups, opts) {
+  const doc = new J({ unit: "pt", format: opts.paper === "a4" ? "a4" : "letter" });
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 36;
+  const RED = [201, 54, 43], INK = [28, 25, 23], MUTED = [110, 104, 98], LINE = [226, 221, 214], LINK = [37, 99, 235];
+  const copies = rows.reduce((n, c) => n + (c.qty || 1), 0);
+  const total = rows.reduce((n, c) => { const p = pickPrice(c); return n + (p ? p.value * (c.qty || 1) : 0); }, 0);
+  const priced = rows.filter(c => pickPrice(c)).length;
+  const dates = rows.map(c => c.price && c.price.updated ? String(c.price.updated).slice(0, 10).replace(/\//g, "-") : "").filter(Boolean).sort();
+  doc.setProperties({ title: "Poke Lab collection report " + opts.date, creator: "Poke Lab" });
+
+  /* cover: title, totals, the sets and the most valuable cards */
+  doc.setFillColor(...RED); doc.rect(0, 0, W, 6, "F");
+  doc.setTextColor(...INK); doc.setFont("helvetica", "bold"); doc.setFontSize(22);
+  doc.text("Pokémon collection report", M, M + 22);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...MUTED);
+  doc.text(pdfText(`Poke Lab · ${opts.date} · ${opts.scope}`), M, M + 40, { maxWidth: W - 2 * M });
+  const stats = [["Cards", copies.toLocaleString("en-US")], ["Different cards", rows.length.toLocaleString("en-US")], ["Sets", String(groups.length)], ["TCGplayer value", money(total) || "$0.00"]];
+  const bw = (W - 2 * M - 3 * 10) / 4; let y = M + 58;
+  stats.forEach(([k, v], i) => {
+    const x = M + i * (bw + 10);
+    doc.setDrawColor(...LINE); doc.setFillColor(250, 248, 245); doc.roundedRect(x, y, bw, 50, 6, 6, "FD");
+    doc.setFontSize(8); doc.setTextColor(...MUTED); doc.text(k.toUpperCase(), x + 10, y + 16);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(...INK); doc.text(v, x + 10, y + 38); doc.setFont("helvetica", "normal");
+  });
+  y += 66;
+  doc.setFontSize(8.5); doc.setTextColor(...MUTED);
+  const notes = [
+    `Values are TCGplayer market prices from TCGdex${dates.length ? `, updated ${dates[dates.length - 1]}` : ""}. ${priced < rows.length ? `${rows.length - priced} of the ${rows.length} different cards have no price yet and aren't counted. ` : ""}Low and High are TCGplayer's current price range. Cards marked * are priced from Cardmarket in euros at today's rate.`,
+    "eBay: no free source publishes eBay sold prices, so each card's \"Sold\" link opens its recent sold listings on eBay. Tap a market price to open the card on TCGplayer."
+  ];
+  for (const t of notes) { const lines = doc.splitTextToSize(pdfText(t), W - 2 * M); doc.text(lines, M, y); y += lines.length * 11 + 4; }
+
+  const head = { fillColor: INK, textColor: 255, fontStyle: "bold", fontSize: 8 };
+  const base = { font: "helvetica", fontSize: 8, cellPadding: 3, textColor: INK, lineColor: LINE, lineWidth: 0.5, overflow: "linebreak" };
+  y += 6;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...INK); doc.text("Sets", M, y); y += 6;
+  doc.autoTable({
+    startY: y, margin: { left: M, right: M, bottom: M + 14 }, styles: base, headStyles: head, alternateRowStyles: { fillColor: [250, 248, 245] },
+    head: [["Set", "Code", "Series", "Have", "Complete", "Copies", "Value"]],
+    body: groups.map(g => [pdfSet(g.name, g.code, g.lang), pdfText(g.code), pdfText(g.series), g.catTotal ? `${g.have} of ${g.catTotal}` : String(g.have), g.catTotal ? Math.round(100 * g.have / g.catTotal) + "%" : "", String(g.copies), money(g.value)]),
+    columnStyles: { 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" } }
+  });
+  const top = rows.filter(c => pickPrice(c)).sort((a, b) => pickPrice(b).value - pickPrice(a).value).slice(0, 10);
+  if (top.length) {
+    y = doc.lastAutoTable.finalY + 22; if (y > H - 140) { doc.addPage(); y = M + 10; }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...INK); doc.text("Most valuable", M, y); y += 6;
+    doc.autoTable({
+      startY: y, margin: { left: M, right: M, bottom: M + 14 }, styles: base, headStyles: head, alternateRowStyles: { fillColor: [250, 248, 245] },
+      head: [["Card", "Set", "No.", "Finish", "Copies", "Each", "Value"]],
+      body: top.map(c => { const p = pickPrice(c), q = c.qty || 1; return [pdfName(c), pdfSet(c.setName, c.setCode, c.lang), pdfText(c.number), pdfFinish(p.finish), String(q), money(p.value) + (p.eur ? " *" : ""), money(p.value * q)]; }),
+      columnStyles: { 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" } }
+    });
+  }
+
+  /* one checklist per set */
+  const cols = ["", "No.", "Name", "Rarity", "Finish", "Qty", "Cond.", "Market", "Low", "High", "Value", "eBay"];
+  for (const g of groups) {
+    doc.addPage(); y = M + 6;
+    doc.setFillColor(...RED); doc.rect(0, 0, W, 6, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(...INK);
+    const title = pdfSet(g.name, g.code, g.lang);
+    doc.text(title, M, y + 14);
+    if (g.code && title !== pdfSet("", g.code, g.lang)) { const tw = doc.getTextWidth(title); doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...MUTED); doc.text(pdfText(g.code), M + tw + 8, y + 14); }
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...MUTED);
+    const sub = [g.series, g.released ? "Released " + String(g.released).slice(0, 10).replace(/\//g, "-") : "", g.lang ? langName(g.lang) : "", g.printed ? `${g.printed} cards printed` : ""].filter(Boolean).join(" · ");
+    if (sub) doc.text(pdfText(sub), M, y + 30);
+    y += 42;
+    if (g.catTotal) {
+      const pct = g.have / g.catTotal, bwid = W - 2 * M;
+      doc.setFillColor(236, 232, 226); doc.roundedRect(M, y, bwid, 8, 4, 4, "F");
+      if (pct > 0) { doc.setFillColor(...RED); doc.roundedRect(M, y, Math.max(8, bwid * pct), 8, 4, 4, "F"); }
+      y += 20; doc.setFontSize(10); doc.setTextColor(...INK);
+      doc.text(`You have ${g.have} of ${g.catTotal} cards (${Math.round(pct * 100)}%) · ${g.copies} cop${g.copies === 1 ? "y" : "ies"} · ${money(g.value) || "$0.00"}`, M, y);
+      y += 6;
+    } else {
+      doc.setFontSize(10); doc.setTextColor(...INK);
+      doc.text(`${g.have} different card${g.have === 1 ? "" : "s"} · ${g.copies} cop${g.copies === 1 ? "y" : "ies"} · ${money(g.value) || "$0.00"}`, M, y); y += 6;
+    }
+    /* count by rarity: owned of all, when the catalogue has the set */
+    const rar = new Map();
+    const catSet = g.catTotal ? Cat.cards.filter(x => x.set.id === g.key) : [];
+    const haveNum = new Set(Store.cards.filter(c => inColl(c, view.coll) && (c.setId || c.setName) === g.key).map(c => normNum(c.number)));
+    if (catSet.length) for (const x of catSet) { const r = x.rarity || "Not listed"; const e = rar.get(r) || [0, 0]; e[1]++; if (haveNum.has(x.nn)) e[0]++; rar.set(r, e); }
+    else for (const c of g.owned) { const r = c.rarity || "Not listed"; const e = rar.get(r) || [0, 0]; e[0]++; rar.set(r, e); }
+    if (rar.size) {
+      y += 8; doc.setFontSize(8.5); doc.setTextColor(...MUTED);
+      const line = [...rar.entries()].map(([r, [h, t]]) => catSet.length ? `${r} ${h}/${t}` : `${r} ${h}`).join("   ·   ");
+      const lines = doc.splitTextToSize(pdfText(line), W - 2 * M); doc.text(lines, M, y); y += lines.length * 10;
+    }
+    const list = [...g.owned.map(c => ({ c, own: true })), ...g.missing.map(x => ({ x, own: false }))]
+      .sort((a, b) => byNumber(a.c || a.x, b.c || b.x));
+    const links = [];
+    const body = list.map(it => {
+      if (it.own) {
+        const c = it.c, q = c.qty || 1, p = pickPrice(c), cp = compPrices(c);
+        links.push({ tcg: compLinks(c).tcgp, ebay: compLinks(c).ebay });
+        return ["", pdfNum(c.number, g.printed), pdfName(c), pdfText(c.rarity), p ? pdfFinish(p.finish) : c.finish ? pdfFinish(c.finish) : "", String(q), condShort(c),
+          p ? money(p.value) + (p.eur ? " *" : "") : "", money(cp.low), money(cp.high), p ? money(p.value * q) : "", "Sold"];
+      }
+      const x = it.x;
+      links.push({ tcg: "", ebay: ebaySold(`${x.name} ${x.number}/${x.set.total || ""} ${x.set.name}`) });
+      return ["", pdfNum(x.number, g.printed), pdfText(x.name), pdfText(x.rarity), "", "", "", "", "", "", "", "Sold"];
+    });
+    doc.autoTable({
+      startY: y + 4, margin: { left: M, right: M, top: M, bottom: M + 14 }, styles: base, headStyles: head, alternateRowStyles: { fillColor: [250, 248, 245] },
+      head: [cols], body,
+      columnStyles: { 0: { cellWidth: 16 }, 1: { cellWidth: 46 }, 3: { cellWidth: 64 }, 4: { cellWidth: 56 }, 5: { cellWidth: 24, halign: "right" }, 6: { cellWidth: 30 },
+        7: { cellWidth: 46, halign: "right" }, 8: { cellWidth: 40, halign: "right" }, 9: { cellWidth: 40, halign: "right" }, 10: { cellWidth: 46, halign: "right" }, 11: { cellWidth: 30 } },
+      didParseCell: d => {
+        if (d.section !== "body") return;
+        const it = list[d.row.index];
+        if (!it.own) d.cell.styles.textColor = MUTED;
+        if ((d.column.index === 7 && it.own && links[d.row.index].tcg) || d.column.index === 11) d.cell.styles.textColor = LINK;
+      },
+      didDrawCell: d => {
+        if (d.section !== "body") return;
+        const it = list[d.row.index], ln = links[d.row.index];
+        if (d.column.index === 0) {
+          const s = 8, bx = d.cell.x + (d.cell.width - s) / 2, by = d.cell.y + (d.cell.height - s) / 2;
+          doc.setDrawColor(...(it.own ? RED : MUTED)); doc.setLineWidth(0.8); doc.rect(bx, by, s, s);
+          if (it.own) { doc.setDrawColor(...RED); doc.setLineWidth(1.2); doc.line(bx + 1.6, by + 4.2, bx + 3.4, by + 6.2); doc.line(bx + 3.4, by + 6.2, bx + 6.8, by + 1.8); }
+          doc.setLineWidth(0.5);
+        }
+        if (d.column.index === 7 && it.own && ln.tcg && d.cell.raw) doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url: ln.tcg });
+        if (d.column.index === 11 && ln.ebay) doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url: ln.ebay });
+      }
+    });
+  }
+
+  /* page footers */
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i); doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...MUTED);
+    doc.text(`Poke Lab collection report · ${opts.date}`, M, H - M + 8);
+    doc.text(`Page ${i} of ${n}`, W - M, H - M + 8, { align: "right" });
+  }
+  return doc.output("blob");
+}
+
+$("#dlRep").addEventListener("click", () => {
+  const rows = visibleRows(); if (!rows.length) { toast("No cards to put in a report."); return; }
+  $("#repBody").innerHTML = `
+    <p class="muted" style="margin:0">Covers ${esc(shownNote(rows))}, set by set like a checklist: number, rarity, finish, copies, condition, TCGplayer prices and a link to each card's eBay sold listings.</p>
+    <label class="inline-check"><input type="checkbox" id="repMissing" ${ReportPrefs.missing ? "checked" : ""}> Include the cards I'm missing from each set</label>
+    <div class="field"><label for="repPaper">Paper size</label><select id="repPaper"><option value="letter"${ReportPrefs.paper !== "a4" ? " selected" : ""}>US Letter</option><option value="a4"${ReportPrefs.paper === "a4" ? " selected" : ""}>A4</option></select></div>
+    <div class="actions"><button class="btn primary" type="button" id="repPdf">Save PDF</button><button class="btn" type="button" id="repCsv">Save spreadsheet</button></div>
+    <p class="muted" id="repStatus" role="status" style="margin:0"></p>`;
+  $("#repMissing").addEventListener("change", e => { ReportPrefs.missing = e.target.checked; saveReportPrefs(); });
+  $("#repPaper").addEventListener("change", e => { ReportPrefs.paper = e.target.value; saveReportPrefs(); });
+  const status = $("#repStatus");
+  $("#repCsv").addEventListener("click", async () => {
+    const groups = ReportPrefs.missing ? reportGroups(rows, true) : null;
+    const missing = groups ? groups.flatMap(g => g.missing) : null;
+    if (await saveFile(new Blob([collectionCSV(rows, missing)], { type: "text/csv;charset=utf-8" }), `poke-lab-${missing ? "checklist" : "collection"}-${today()}.csv`))
+      status.textContent = `Saved ${shownNote(rows)}${missing && missing.length ? ` and ${missing.length} missing card${missing.length === 1 ? "" : "s"}` : ""} as a spreadsheet.`;
+  });
+  $("#repPdf").addEventListener("click", async e => {
+    const btn = e.currentTarget; if (btn.disabled) return;
+    btn.disabled = true; status.textContent = "Making the PDF…";
+    try {
+      const J = await loadPdfLib();
+      const groups = reportGroups(rows, ReportPrefs.missing);
+      const blob = reportPDF(J, rows, groups, { paper: ReportPrefs.paper, date: today(), scope: shownNote(rows).replace(/^./, s => s.toUpperCase()) });
+      status.textContent = "";
+      if (await saveFile(blob, `poke-lab-report-${today()}.pdf`)) status.textContent = `Saved the report: ${groups.length} set${groups.length === 1 ? "" : "s"}.`;
+    } catch (err) {
+      status.textContent = navigator.onLine === false ? "The PDF maker needs the internet the first time. The spreadsheet works offline." : "The PDF couldn't be made just now. The spreadsheet still works.";
+    } finally { btn.disabled = false; }
+  });
+  $("#repSheet").showModal();
 });
 /* ---------- backup file: the whole collection (cards, decks and photos) in one file that any version can load ---------- */
 const BACKUP_KEY = "pokelab-backup";
