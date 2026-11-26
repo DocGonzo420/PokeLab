@@ -71,7 +71,7 @@ function findCard(cv) {
 function findQuad(cv) {
   const W = cv.width, H = cv.height, d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, W, H).data;
   /* edges: the strongest colour channel's slope at each pixel */
-  const mag = new Float32Array(W * H), ang = new Float32Array(W * H);
+  const mag = new Float32Array(W * H), ang = new Float32Array(W * H), jxx = new Float32Array(W * H), jyy = new Float32Array(W * H), jxy = new Float32Array(W * H);
   for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
     const i = y * W + x; let bm = 0, bx = 0, by = 0;
     for (let c = 0; c < 3; c++) {
@@ -80,14 +80,27 @@ function findQuad(cv) {
       const sy = d[r2 - 4] + 2 * d[r2] + d[r2 + 4] - d[r0 - 4] - 2 * d[r0] - d[r0 + 4];
       const m = sx * sx + sy * sy; if (m > bm) { bm = m; bx = sx; by = sy; }
     }
-    mag[i] = Math.sqrt(bm) / 4; ang[i] = Math.atan2(by, bx);
+    mag[i] = Math.sqrt(bm) / 4; jxx[i] = bx * bx; jyy[i] = by * by; jxy[i] = bx * by;
   }
+  /* each pixel's edge direction, steadied by its neighbours (so a grainy table next to the card can't skew it) */
+  const blur = a => { const t = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 2; x < W - 2; x++) { const i = y * W + x; t[i] = a[i - 2] + a[i - 1] + a[i] + a[i + 1] + a[i + 2]; }
+    for (let y = 2; y < H - 2; y++) for (let x = 0; x < W; x++) { const i = y * W + x; a[i] = t[i - 2 * W] + t[i - W] + t[i] + t[i + W] + t[i + 2 * W]; } };
+  blur(jxx); blur(jyy); blur(jxy);
+  for (let i = 0; i < W * H; i++) ang[i] = 0.5 * Math.atan2(2 * jxy[i], jxx[i] - jyy[i]);
   /* thin each edge to one pixel, keeping only real edges */
-  const T = 14, edge = new Uint8Array(W * H);
+  const T = 14, edge = new Uint8Array(W * H), step = new Float32Array(W * H);
   for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
     const i = y * W + x, m = mag[i]; if (m < T) continue;
     const a = ang[i], ox = Math.round(Math.cos(a)), oy = Math.round(Math.sin(a));
-    if (m >= mag[i + oy * W + ox] && m >= mag[i - oy * W - ox]) edge[i] = 1;
+    if (m < mag[i + oy * W + ox] || m < mag[i - oy * W - ox]) continue;
+    /* a real edge is a step: the two sides differ. A thin stripe or wood grain line has the same colour on both sides. */
+    const ca = Math.cos(a) * 3, sa = Math.sin(a) * 3;
+    const x1 = Math.round(x + ca), y1 = Math.round(y + sa), x2 = Math.round(x - ca), y2 = Math.round(y - sa);
+    if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0 || x1 >= W || x2 >= W || y1 >= H || y2 >= H) continue;
+    const p1 = (y1 * W + x1) * 4, p2 = (y2 * W + x2) * 4;
+    const st = Math.max(Math.abs(d[p1] - d[p2]), Math.abs(d[p1 + 1] - d[p2 + 1]), Math.abs(d[p1 + 2] - d[p2 + 2]));
+    if (st >= 22) { edge[i] = 1; step[i] = st; }
   }
   /* line finder: each edge pixel votes for lines through it at about its own direction */
   const NT = 180, D = Math.ceil(Math.hypot(W, H)), NR = 2 * D + 1, acc = new Float32Array(NT * NR);
@@ -95,10 +108,10 @@ function findQuad(cv) {
   for (let t = 0; t < NT; t++) { COS[t] = Math.cos(t * Math.PI / NT); SIN[t] = Math.sin(t * Math.PI / NT); }
   for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
     const i = y * W + x; if (!edge[i]) continue;
-    let t0 = Math.round(ang[i] * NT / Math.PI); const w = Math.min(1, mag[i] / 40);
+    let t0 = Math.round(ang[i] * NT / Math.PI); const w = Math.min(1, step[i] / 70);
     for (let k = -3; k <= 3; k++) {
-      const t = ((t0 + k) % NT + NT) % NT, r = Math.round(x * COS[t] + y * SIN[t]) + D;
-      acc[t * NR + r] += w * (k === 0 ? 1 : k * k === 1 ? 0.8 : 0.5);
+      const t = ((t0 + k) % NT + NT) % NT, rf = x * COS[t] + y * SIN[t] + D, r = Math.floor(rf), f = rf - r, v = w * (k === 0 ? 1 : k * k === 1 ? 0.8 : 0.5);
+      acc[t * NR + r] += v * (1 - f); acc[t * NR + r + 1] += v * f;
     }
   }
   const lines = [];
@@ -113,12 +126,28 @@ function findQuad(cv) {
     }
     if (peak) lines.push({ t: t * Math.PI / NT, r: r - D, v });
   }
-  lines.sort((a, b) => b.v - a.v); lines.length = Math.min(lines.length, 26);
+  lines.sort((a, b) => b.v - a.v);
+  { /* keep the strongest lines, but no more than 7 running the same way, so a striped table can't crowd out the card */
+    const per = new Uint8Array(12), keep = [];
+    /* where a line crosses the picture's edges, to tell whether two found lines are really the same one */
+    const ends = l => { const c = Math.cos(l.t), sn = Math.sin(l.t), out = [];
+      if (Math.abs(sn) > 1e-6) for (const x of [0, W]) { const y = (l.r - x * c) / sn; if (y >= 0 && y <= H) out.push({ x, y }); }
+      if (Math.abs(c) > 1e-6) for (const y of [0, H]) { const x = (l.r - y * sn) / c; if (x >= 0 && x <= W) out.push({ x, y }); }
+      return out.slice(0, 2); };
+    const dist = (l, p) => Math.abs(p.x * Math.cos(l.t) + p.y * Math.sin(l.t) - l.r);
+    for (const l of lines) {
+      const b = Math.floor(l.t / Math.PI * 12) % 12; if (per[b] >= 14) continue;
+      const e = ends(l); if (e.length < 2) continue;
+      if (keep.some(k => { const ek = ends(k); return ek.length === 2 && e.every(p => dist(k, p) < 3) && ek.every(p => dist(l, p) < 3); })) continue;
+      per[b]++; keep.push(l); if (keep.length >= 60) break;
+    }
+    lines.length = 0; lines.push(...keep);
+  }
   /* how much of a side really lies on an edge pointing the right way */
-  const cover = (p, q) => {
+  const cover = (p, q, s0 = 0.08, s1 = 0.92) => {
     const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy), na = Math.atan2(dx, -dy);
     let hit = 0, n = 0;
-    for (let s = 0.08; s <= 0.92; s += 1 / len) {
+    for (let s = s0; s <= s1; s += 1 / len) {
       const x = p.x + dx * s, y = p.y + dy * s; n++;
       let ok = false;
       for (let o = -1.5; o <= 1.5 && !ok; o += 0.75) {
@@ -161,15 +190,93 @@ function findQuad(cv) {
     if (Math.abs(lv.y) < Math.abs(lv.x) * 1.4) continue;
     const cov = [0, 1, 2, 3].map(k => cover(c[k], c[(k + 1) % 4])), lo = Math.min(...cov);
     if (lo < 0.4) continue;
-    const s = (cov[0] + cov[1] + cov[2] + cov[3]) / 4 * 0.7 + lo * 0.3;
+    /* a card's edge stops at its corners; a stripe, a table edge or a mat runs on past them */
+    const run = [0, 1, 2, 3].map(k => (cover(c[k], c[(k + 1) % 4], 1.07, 1.25) + cover(c[k], c[(k + 1) % 4], -0.25, -0.07)) / 2);
+    const s = (cov[0] + cov[1] + cov[2] + cov[3]) / 4 * 0.7 + lo * 0.3 - (run[0] + run[1] + run[2] + run[3]) / 4 * 0.6 - Math.max(...run) * 0.2;
     if (s < 0.55) continue;
     const area = Math.abs(c.reduce((t, p, k) => t + p.x * c[(k + 1) % 4].y - c[(k + 1) % 4].x * p.y, 0)) / 2;
     cands.push({ c, s, lo, area, long, asp: Math.abs(asp - 63 / 88) });
   }
   if (!cands.length) return null;
-  const top = Math.max(...cands.map(k => k.s));
-  /* a card's inner art frame is a strong outline too: of the good ones, the biggest is the card's own edge */
-  for (const k of cands) if (k.s >= top * 0.88 && (!best || k.area > best.area * 1.03 || (k.area > best.area * 0.97 && k.s > best.s))) best = k;
+  /* A card has a second outline just inside its edge (where the border meets the picture).
+     The best outline with such a twin inside it is the card's own edge; a mat or tray behind the card has no twin. */
+  const inside = (p, c) => { let sgn = 0; for (let k = 0; k < 4; k++) { const a = c[k], b = c[(k + 1) % 4], z = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x); if (Math.abs(z) < 1e-9) continue; const s = Math.sign(z); if (sgn && s !== sgn) return false; sgn = s; } return true; };
+  const near = (a, b) => a.c.every(p => Math.min(...b.c.map(q => Math.hypot(q.x - p.x, q.y - p.y))) < b.long * 0.09);
+  /* how far in the inner outline sits from each side of the outer one (the width of the card's border on that side) */
+  const gaps = (o, n) => [0, 1, 2, 3].map(k => {
+    const a = o.c[k], b = o.c[(k + 1) % 4], len = Math.hypot(b.x - a.x, b.y - a.y);
+    return Math.min(...[0, 1, 2, 3].map(j => { const m = { x: (n.c[j].x + n.c[(j + 1) % 4].x) / 2, y: (n.c[j].y + n.c[(j + 1) % 4].y) / 2 };
+      return Math.abs((b.x - a.x) * (m.y - a.y) - (b.y - a.y) * (m.x - a.x)) / len; })) / o.long; });
+  let twin = null;
+  for (const o of cands) for (const n of cands) {
+    if (n === o || n.area > o.area * 0.97 || n.area < o.area / 1.45) continue;
+    if (!n.c.every(p => inside(p, o.c))) continue;
+    const g = gaps(o, n); if (Math.min(...g) < 0.012 || Math.max(...g) > 0.09) continue;
+    const v = o.s + n.s * 0.3 - (Math.max(...g) - Math.min(...g)) * 4;
+    if (!twin || v > twin.v) twin = { k: o, v };
+  }
+  if (twin) best = twin.k;
+  else for (const k of cands) if (k.asp < 0.06 && (!best || k.s > best.s)) best = k;
+  if (!best) return null;
+  /* A side sitting on the inside edge of the card's border has the border's own outer edge just outside it, with a
+     band of plain border colour in between, the same colour that lies just inside the sides that are already right.
+     Move such sides out to the card's real edge. */
+  {
+    const c = best.c, cx0 = c.reduce((t, p) => t + p.x, 0) / 4, cy0 = c.reduce((t, p) => t + p.y, 0) / 4;
+    const px = (x, y) => { const xi = Math.round(x), yi = Math.round(y); if (xi < 0 || yi < 0 || xi >= W || yi >= H) return null; const o = (yi * W + xi) * 4; return [d[o], d[o + 1], d[o + 2]]; };
+    const strip = (a, b, nx, ny, off) => { const cs = []; for (let k = 0; k <= 16; k++) { const u = 0.2 + 0.6 * k / 16, q = px(a.x + (b.x - a.x) * u + nx * off, a.y + (b.y - a.y) * u + ny * off); if (q) cs.push(q); }
+      if (cs.length < 8) return null; const m = [0, 1, 2].map(ch => cs.reduce((t, q) => t + q[ch], 0) / cs.length);
+      const sd = Math.sqrt(cs.reduce((t, q) => t + (q[0] - m[0]) ** 2 + (q[1] - m[1]) ** 2 + (q[2] - m[2]) ** 2, 0) / cs.length / 3); return { m, sd }; };
+    const cdist = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
+    const info = [0, 1, 2, 3].map(k => {
+      const a = c[k], b = c[(k + 1) % 4], len = Math.hypot(b.x - a.x, b.y - a.y);
+      let nx = (b.y - a.y) / len, ny = -(b.x - a.x) / len; const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      if ((mx + nx - cx0) ** 2 + (my + ny - cy0) ** 2 < (mx - cx0) ** 2 + (my - cy0) ** 2) { nx = -nx; ny = -ny; } /* n points outward */
+      const inn = strip(a, b, nx, ny, -Math.max(1.5, best.long * 0.012));
+      let part = null, gap = false;
+      for (let off = 1; off <= best.long * 0.09; off += 0.5) {
+        const a2 = { x: a.x + nx * off, y: a.y + ny * off }, b2 = { x: b.x + nx * off, y: b.y + ny * off }, cv = cover(a2, b2, 0.15, 0.85);
+        if (cv < 0.3) gap = true;
+        if (gap && off >= best.long * 0.012 && cv >= 0.55) { const band = strip(a, b, nx, ny, off / 2); if (band && band.sd < 20) part = { off, band, nx, ny }; break; }
+      }
+      return { inn, part };
+    });
+    const plain = info.filter(f => !f.part && f.inn).map(f => f.inn.m), withP = info.filter(f => f.part);
+    const all4 = withP.length === 4 && withP.every(f => cdist(f.part.band.m, withP[0].part.band.m) < 40);
+    const move = info.map(f => f.part && (all4 || plain.some(m => cdist(m, f.part.band.m) < 40)));
+    if (move.some(Boolean)) {
+      const sh = [0, 1, 2, 3].map(k => { const a = c[k], b = c[(k + 1) % 4], f = info[k];
+        return move[k] ? [{ x: a.x + f.part.nx * f.part.off, y: a.y + f.part.ny * f.part.off }, { x: b.x + f.part.nx * f.part.off, y: b.y + f.part.ny * f.part.off }] : [a, b]; });
+      const lineOf = ([p, q]) => { const t = Math.atan2(q.x - p.x, -(q.y - p.y)); return { t, r: p.x * Math.cos(t) + p.y * Math.sin(t) }; };
+      const ls = sh.map(lineOf), c2 = [0, 1, 2, 3].map(k => meet(ls[(k + 3) % 4], ls[k]));
+      if (c2.every(p => p)) best.c = c2;
+    }
+  }
+  /* sharpen each side: fit a straight line through the edge pixels lying right along it */
+  const fit = (p, q) => {
+    const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len, na = Math.atan2(dx, -dy);
+    let sw = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+    const x0 = Math.max(2, Math.floor(Math.min(p.x, q.x) - 3)), x1 = Math.min(W - 3, Math.ceil(Math.max(p.x, q.x) + 3));
+    const y0 = Math.max(2, Math.floor(Math.min(p.y, q.y) - 3)), y1 = Math.min(H - 3, Math.ceil(Math.max(p.y, q.y) + 3));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const i = y * W + x; if (!edge[i]) continue;
+      const t = ((x - p.x) * ux + (y - p.y) * uy) / len; if (t < 0.1 || t > 0.9) continue;
+      if (Math.abs((x - p.x) * uy - (y - p.y) * ux) > 2.5) continue;
+      let da = Math.abs(ang[i] - na) % Math.PI; if (da > Math.PI / 2) da = Math.PI - da; if (da > 0.3) continue;
+      const w = step[i]; sw += w; sx += w * x; sy += w * y; sxx += w * x * x; syy += w * y * y; sxy += w * x * y;
+    }
+    if (sw <= 0) return null;
+    const mx = sx / sw, my = sy / sw, cxx = sxx / sw - mx * mx, cyy = syy / sw - my * my, cxy = sxy / sw - mx * my;
+    const th = 0.5 * Math.atan2(2 * cxy, cxx - cyy) + Math.PI / 2; /* the normal: across the spread of points */
+    return { t: th, r: mx * Math.cos(th) + my * Math.sin(th) };
+  };
+  {
+    const ls = [0, 1, 2, 3].map(k => fit(best.c[k], best.c[(k + 1) % 4]));
+    if (ls.every(l => l)) {
+      const c2 = [0, 1, 2, 3].map(k => meet(ls[(k + 3) % 4], ls[k]));
+      if (c2.every(p => p && Math.min(...best.c.map(q => Math.hypot(q.x - p.x, q.y - p.y))) < 4)) best.c = c2;
+    }
+  }
   const c = best.c;
   /* a card has print inside it; an empty tray or shadow does not */
   const cx = c.reduce((t, p) => t + p.x, 0) / 4, cy = c.reduce((t, p) => t + p.y, 0) / 4;
