@@ -126,6 +126,7 @@ function findQuad(cv) {
     }
     if (peak) lines.push({ t: t * Math.PI / NT, r: r - D, v });
   }
+  { let ne=0, ma=0; for (let i=0;i<W*H;i++) ne+=edge[i]; for (let i=0;i<acc.length;i++) if(acc[i]>ma) ma=acc[i]; window.E={ne,ma:ma.toFixed(0),raw:lines.length}; }
   lines.sort((a, b) => b.v - a.v);
   { /* keep the strongest lines, but no more than 7 running the same way, so a striped table can't crowd out the card */
     const per = new Uint8Array(12), keep = [];
@@ -381,7 +382,7 @@ for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.
   const good=err<2.5;if(good)ok++;
   let rec='';{const Dd=window.D||{lines:[],cands:[]};const qe=c=>Math.max(...want.map(p=>Math.min(...c.map(z=>Math.hypot(z.x/2.4-p.x,z.y/3.2-p.y)))));
    const cs=Dd.cands.map(k=>({s:k.s,e:qe(k.c)})).sort((a,b)=>b.s-a.s);const bi=cs.reduce((b,k,i)=>(!b||k.e<b.e)?{...k,i}:b,null);
-   rec=` lines ${Dd.lines.length} cands ${cs.length} best ${bi?bi.e.toFixed(1)+'@'+bi.i+' s'+bi.s.toFixed(2):'-'} busy ${Dd.busy==null?'-':Dd.busy.toFixed(2)}`;window.D=null;}
+   rec=` lines ${Dd.lines.length} cands ${cs.length} best ${bi?bi.e.toFixed(1)+'@'+bi.i+' s'+bi.s.toFixed(2):'-'} busy ${Dd.busy==null?'-':Dd.busy.toFixed(2)} E ${JSON.stringify(window.E)}`;window.D=null;}
   lines.push(`${c} t${t} ${good?"OK ":"BAD"} rot ${(rot*180/Math.PI).toFixed(0)} tilt ${tilt} got deg ${r?r.deg.toFixed(1):"-"} oldsize ${err0.toFixed(2)} quad ${err.toFixed(2)}% ${ms.toFixed(0)}ms${rec}`);
   if(!good||t==4){const g=cv.getContext("2d");g.strokeStyle="#0f0";g.lineWidth=3;if(r){g.beginPath();r.pts.forEach((p,i)=>{const X=p.x*W/100,Y=p.y*H/100;i?g.lineTo(X,Y):g.moveTo(X,Y);});g.closePath();g.stroke();}
    cv.style.width="150px";document.getElementById("pics").appendChild(cv);
