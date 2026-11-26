@@ -62,83 +62,137 @@ function findCard(cv) {
   return { cx: (best.x + best.w / 2) / W * 100, cy: (best.y + best.h / 2) / H * 100, size: best.h / H * 100, score: best.s, busy: best.busy, box: { x: best.x, y: best.y, w: best.w, h: best.h } };
 }
 
-/* ---------- a turned or tilted card: four corners instead of a straight box ----------
-   findQuad turns the small picture in steps and keeps the angle where findCard's straight box fits best,
-   then nudges each corner on a sharper copy until the four sides sit on the card's edges (a tilted card
-   is a little narrower at the far end). Corners come back in % of the picture: top left, top right,
-   bottom right, bottom left. */
-const QUAD_ANGLES = [0, -5, 5, -10, 10, -15, 15, -20, 20, -26, 26];
-function turnedCopy(cv, deg, fill) {
-  const W = cv.width, H = cv.height, c = document.createElement("canvas"); c.width = W; c.height = H;
-  const x = c.getContext("2d", { willReadFrequently: true });
-  x.fillStyle = fill; x.fillRect(0, 0, W, H);
-  x.translate(W / 2, H / 2); x.rotate(-deg * Math.PI / 180); x.drawImage(cv, -W / 2, -H / 2);
-  return c;
-}
-function meanFill(cv) {
-  const d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, cv.width, cv.height).data;
-  let r = 0, g = 0, b = 0, n = 0;
-  for (let i = 0; i < d.length; i += 16) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
-  return `rgb(${r / n | 0},${g / n | 0},${b / n | 0})`;
-}
-function findQuad(cv, hi) {
-  const W = cv.width, H = cv.height, fill = meanFill(cv);
-  const look = deg => { const r = findCard(deg ? turnedCopy(cv, deg, fill) : cv); return r ? { ...r, deg } : null; };
-  let best = null;
-  for (const a of QUAD_ANGLES) { const r = look(a); if (r && (!best || r.score > best.score)) best = r; }
-  if (!best) return null;
-  for (const step of [2.5, 1.2]) for (const a of [best.deg - step, best.deg + step]) {
-    if (Math.abs(a) > 30) continue;
-    const r = look(a); if (r && r.score > best.score) best = r;
-  }
-  /* the straight box's corners, turned back */
-  const t = best.deg * Math.PI / 180, cs = Math.cos(t), sn = Math.sin(t), b = best.box;
-  const back = (x, y) => ({ x: (x - W / 2) * cs - (y - H / 2) * sn + W / 2, y: (x - W / 2) * sn + (y - H / 2) * cs + H / 2 });
-  let pts = [back(b.x, b.y), back(b.x + b.w, b.y), back(b.x + b.w, b.y + b.h), back(b.x, b.y + b.h)];
-  if (hi) pts = fitCorners(hi, pts.map(p => ({ x: p.x * hi.width / W, y: p.y * hi.height / H }))).map(p => ({ x: p.x * W / hi.width, y: p.y * H / hi.height }));
-  return { pts: pts.map(p => ({ x: p.x / W * 100, y: p.y / H * 100 })), deg: best.deg, cx: best.cx, cy: best.cy, size: best.size, score: best.score, busy: best.busy };
-}
-/* move each corner a few pixels at a time while the edges under the four sides get stronger */
-function fitCorners(cv, pts) {
+/* ---------- a turned or tilted card: four straight edges, as four lines ----------
+   findQuad looks for straight edges in a small copy of the camera picture (a line finder that votes
+   for each edge's direction), pairs up two near-parallel long sides and two near-parallel short sides,
+   and keeps the card-shaped four-sided outline whose sides are best covered by real edges. Because each
+   side is its own line, a card that is turned or tilted away from the camera still fits.
+   Corners come back in % of the picture: top left, top right, bottom right, bottom left. */
+function findQuad(cv) {
   const W = cv.width, H = cv.height, d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, W, H).data;
-  const CAP = 40, gx = new Float32Array(W * H), gy = new Float32Array(W * H);
-  const diff = (a, c) => Math.max(Math.abs(d[a] - d[c]), Math.abs(d[a + 1] - d[c + 1]), Math.abs(d[a + 2] - d[c + 2]));
+  /* edges: the strongest colour channel's slope at each pixel */
+  const mag = new Float32Array(W * H), ang = new Float32Array(W * H);
   for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
-    const i = y * W + x, j = i * 4;
-    gx[i] = Math.min(CAP, diff(j + 4, j - 4)) / CAP; gy[i] = Math.min(CAP, diff(j + W * 4, j - W * 4)) / CAP;
-  }
-  const side = (p, q) => {
-    const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy); if (len < 4) return 0;
-    const nx = -dy / len, ny = dx / len, ax = Math.abs(nx), ay = Math.abs(ny), n = Math.max(8, Math.round(len / 1.5));
-    let sum = 0;
-    for (let k = 0; k < n; k++) {
-      const f = 0.1 + 0.8 * k / (n - 1), x = p.x + dx * f, y = p.y + dy * f; let e = 0;
-      for (let o = -1; o <= 1; o++) {
-        const xi = Math.round(x + nx * o), yi = Math.round(y + ny * o);
-        if (xi < 1 || yi < 1 || xi >= W - 1 || yi >= H - 1) continue;
-        const i = yi * W + xi, v = ax * gx[i] + ay * gy[i]; if (v > e) e = v;
-      }
-      sum += e;
+    const i = y * W + x; let bm = 0, bx = 0, by = 0;
+    for (let c = 0; c < 3; c++) {
+      const p = i * 4 + c, r0 = p - W * 4, r2 = p + W * 4;
+      const sx = d[r0 + 4] + 2 * d[p + 4] + d[r2 + 4] - d[r0 - 4] - 2 * d[p - 4] - d[r2 - 4];
+      const sy = d[r2 - 4] + 2 * d[r2] + d[r2 + 4] - d[r0 - 4] - 2 * d[r0] - d[r0 + 4];
+      const m = sx * sx + sy * sy; if (m > bm) { bm = m; bx = sx; by = sy; }
     }
-    return sum / n;
+    mag[i] = Math.sqrt(bm) / 4; ang[i] = Math.atan2(by, bx);
+  }
+  /* thin each edge to one pixel, keeping only real edges */
+  const T = 14, edge = new Uint8Array(W * H);
+  for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
+    const i = y * W + x, m = mag[i]; if (m < T) continue;
+    const a = ang[i], ox = Math.round(Math.cos(a)), oy = Math.round(Math.sin(a));
+    if (m >= mag[i + oy * W + ox] && m >= mag[i - oy * W - ox]) edge[i] = 1;
+  }
+  /* line finder: each edge pixel votes for lines through it at about its own direction */
+  const NT = 180, D = Math.ceil(Math.hypot(W, H)), NR = 2 * D + 1, acc = new Float32Array(NT * NR);
+  const COS = new Float32Array(NT), SIN = new Float32Array(NT);
+  for (let t = 0; t < NT; t++) { COS[t] = Math.cos(t * Math.PI / NT); SIN[t] = Math.sin(t * Math.PI / NT); }
+  for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
+    const i = y * W + x; if (!edge[i]) continue;
+    let t0 = Math.round(ang[i] * NT / Math.PI); const w = Math.min(1, mag[i] / 40);
+    for (let k = -3; k <= 3; k++) {
+      const t = ((t0 + k) % NT + NT) % NT, r = Math.round(x * COS[t] + y * SIN[t]) + D;
+      acc[t * NR + r] += w * (k === 0 ? 1 : k * k === 1 ? 0.8 : 0.5);
+    }
+  }
+  const lines = [];
+  for (let t = 0; t < NT; t++) for (let r = 2; r < NR - 2; r++) {
+    const v = acc[t * NR + r]; if (v < H * 0.12) continue;
+    let peak = true;
+    for (let dt = -2; dt <= 2 && peak; dt++) for (let dr = -2; dr <= 2; dr++) {
+      if (!dt && !dr) continue;
+      const tt = ((t + dt) % NT + NT) % NT, rr = (t + dt < 0 || t + dt >= NT) ? 2 * D - (r + dr) : r + dr;
+      if (rr < 0 || rr >= NR) continue;
+      const u = acc[tt * NR + rr]; if (u > v || (u === v && (dt < 0 || (!dt && dr < 0)))) { peak = false; break; }
+    }
+    if (peak) lines.push({ t: t * Math.PI / NT, r: r - D, v });
+  }
+  lines.sort((a, b) => b.v - a.v); lines.length = Math.min(lines.length, 26);
+  /* how much of a side really lies on an edge pointing the right way */
+  const cover = (p, q) => {
+    const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy), na = Math.atan2(dx, -dy);
+    let hit = 0, n = 0;
+    for (let s = 0.08; s <= 0.92; s += 1 / len) {
+      const x = p.x + dx * s, y = p.y + dy * s; n++;
+      let ok = false;
+      for (let o = -1.5; o <= 1.5 && !ok; o += 0.75) {
+        const xi = Math.round(x - dy / len * o), yi = Math.round(y + dx / len * o);
+        if (xi < 0 || yi < 0 || xi >= W || yi >= H) continue;
+        const i = yi * W + xi; if (!edge[i]) continue;
+        let da = Math.abs(ang[i] - na) % Math.PI; if (da > Math.PI / 2) da = Math.PI - da;
+        if (da < 0.35) ok = true;
+      }
+      if (ok) hit++;
+    }
+    return n ? hit / n : 0;
   };
-  const score = q => { const s = [side(q[0], q[1]), side(q[1], q[2]), side(q[2], q[3]), side(q[3], q[0])]; return (s[0] + s[1] + s[2] + s[3]) / 4 * 0.7 + Math.min(...s) * 0.3; };
-  const start = pts.map(p => ({ ...p })), reach = Math.hypot(pts[0].x - pts[3].x, pts[0].y - pts[3].y) * 0.07;
-  let cur = pts.map(p => ({ ...p })), s = score(cur);
-  for (const step of [3, 2, 1, 1]) {
-    for (let k = 0; k < 4; k++) {
-      let bestP = cur[k], bestS = s;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        if (!dx && !dy) continue;
-        const np = { x: cur[k].x + dx * step, y: cur[k].y + dy * step };
-        if (Math.hypot(np.x - start[k].x, np.y - start[k].y) > reach) continue;
-        const q = cur.slice(); q[k] = np; const v = score(q);
-        if (v > bestS + 1e-4) { bestS = v; bestP = np; }
-      }
-      cur[k] = bestP; s = bestS;
-    }
+  const meet = (a, b) => {
+    const c1 = Math.cos(a.t), s1 = Math.sin(a.t), c2 = Math.cos(b.t), s2 = Math.sin(b.t), det = c1 * s2 - s1 * c2;
+    if (Math.abs(det) < 1e-6) return null;
+    return { x: (a.r * s2 - b.r * s1) / det, y: (c1 * b.r - c2 * a.r) / det };
+  };
+  const angDiff = (a, b) => { let x = Math.abs(a - b) % Math.PI; return x > Math.PI / 2 ? Math.PI - x : x; };
+  /* pairs of nearly parallel lines a sensible distance apart */
+  const pairs = [];
+  for (let i = 0; i < lines.length; i++) for (let j = i + 1; j < lines.length; j++) {
+    const a = lines[i], b = lines[j]; if (angDiff(a.t, b.t) > 0.21) continue;
+    const mx = W / 2, my = H / 2, da = mx * Math.cos(a.t) + my * Math.sin(a.t) - a.r, db = mx * Math.cos(b.t) + my * Math.sin(b.t) - b.r;
+    const gap = Math.abs(da - db * (Math.cos(a.t - b.t) < 0 ? -1 : 1)); if (gap < H * 0.25) continue;
+    pairs.push([a, b]);
   }
-  return cur;
+  let best = null; const cands = [];
+  for (let i = 0; i < pairs.length; i++) for (let j = i + 1; j < pairs.length; j++) {
+    const [a1, a2] = pairs[i], [b1, b2] = pairs[j];
+    if (Math.abs(angDiff(a1.t, b1.t) - Math.PI / 2) > 0.32) continue;
+    const c = [meet(a1, b1), meet(a1, b2), meet(a2, b2), meet(a2, b1)]; if (c.some(p => !p)) continue;
+    if (c.some(p => p.x < 1 || p.y < 1 || p.x > W - 2 || p.y > H - 2)) continue;
+    const L = k => Math.hypot(c[k].x - c[(k + 1) % 4].x, c[k].y - c[(k + 1) % 4].y);
+    const sA = (L(0) + L(2)) / 2, sB = (L(1) + L(3)) / 2, long = Math.max(sA, sB), short = Math.min(sA, sB);
+    if (long < H * 0.35) continue;
+    const asp = short / long; if (asp < 0.6 || asp > 0.84) continue;
+    /* upright cards only: the long sides run up and down (turned up to about 35 degrees) */
+    const ls = sA > sB ? 1 : 0, lv = { x: c[ls + 1].x - c[ls].x, y: c[ls + 1].y - c[ls].y };
+    if (Math.abs(lv.y) < Math.abs(lv.x) * 1.4) continue;
+    const cov = [0, 1, 2, 3].map(k => cover(c[k], c[(k + 1) % 4])), lo = Math.min(...cov);
+    if (lo < 0.4) continue;
+    const s = (cov[0] + cov[1] + cov[2] + cov[3]) / 4 * 0.7 + lo * 0.3;
+    if (s < 0.55) continue;
+    const area = Math.abs(c.reduce((t, p, k) => t + p.x * c[(k + 1) % 4].y - c[(k + 1) % 4].x * p.y, 0)) / 2;
+    cands.push({ c, s, lo, area, long, asp: Math.abs(asp - 63 / 88) });
+  }
+  if (!cands.length) return null;
+  const top = Math.max(...cands.map(k => k.s));
+  /* a card's inner art frame is a strong outline too: of the good ones, the biggest is the card's own edge */
+  for (const k of cands) if (k.s >= top * 0.88 && (!best || k.area > best.area * 1.03 || (k.area > best.area * 0.97 && k.s > best.s))) best = k;
+  const c = best.c;
+  /* a card has print inside it; an empty tray or shadow does not */
+  const cx = c.reduce((t, p) => t + p.x, 0) / 4, cy = c.reduce((t, p) => t + p.y, 0) / 4;
+  let busy = 0, n = 0;
+  for (let k = 0; k < 400; k++) {
+    const u = 0.15 + 0.7 * (k % 20) / 19, v = 0.15 + 0.7 * Math.floor(k / 20) / 19;
+    const x = Math.round(c[0].x + (c[1].x - c[0].x) * u + (c[3].x - c[0].x) * v), y = Math.round(c[0].y + (c[1].y - c[0].y) * u + (c[3].y - c[0].y) * v);
+    if (x < 0 || y < 0 || x >= W || y >= H) continue; busy += Math.min(1, mag[y * W + x] / 30); n++;
+  }
+  busy = n ? busy / n : 0; if (busy < 0.08) return null;
+  /* order the corners: top side first (the short side higher up), then clockwise */
+  const ord = [...c].sort((p, q) => Math.atan2(p.y - cy, p.x - cx) - Math.atan2(q.y - cy, q.x - cx)); /* clockwise on screen */
+  const len = k => Math.hypot(ord[k].x - ord[(k + 1) % 4].x, ord[k].y - ord[(k + 1) % 4].y);
+  let st = 0, bestY = Infinity;
+  for (let k = 0; k < 4; k++) {
+    const shortSide = len(k) + len((k + 2) % 4) < len((k + 1) % 4) + len((k + 3) % 4);
+    const my = (ord[k].y + ord[(k + 1) % 4].y) / 2;
+    if (shortSide && my < bestY) { bestY = my; st = k; }
+  }
+  const pts = [0, 1, 2, 3].map(k => ord[(st + k) % 4]);
+  const hgt = (Math.hypot(pts[3].x - pts[0].x, pts[3].y - pts[0].y) + Math.hypot(pts[2].x - pts[1].x, pts[2].y - pts[1].y)) / 2;
+  return { pts: pts.map(p => ({ x: p.x / W * 100, y: p.y / H * 100 })), cx: cx / W * 100, cy: cy / H * 100, size: hgt / H * 100, score: best.s, busy,
+    deg: Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) * 180 / Math.PI };
 }
 /* the 3 x 3 map that sends the corners of a w x h box to the four points q (perspective) */
 function boxToQuad(w, h, q) {
@@ -171,18 +225,17 @@ function flattenQuad(src, sw, sh, q, w, h) {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const z = g * x + k * y + 1, sx = (a * x + b * y + c) / z - x0, sy = (d * x + e * y + f) / z - y0;
     const ix = Math.floor(sx), iy = Math.floor(sy), o = (y * w + x) * 4;
-    if (ix < 0 || iy < 0 || ix >= bw - 1 || iy >= bh - 1) { od[o + 3] = 255; continue; }
+    od[o + 3] = 255;
+    if (ix < 0 || iy < 0 || ix >= bw - 1 || iy >= bh - 1) continue;
     const fx = sx - ix, fy = sy - iy, p = (iy * bw + ix) * 4, p2 = p + bw * 4;
     for (let ch = 0; ch < 3; ch++) {
       const top = sd[p + ch] + (sd[p + 4 + ch] - sd[p + ch]) * fx, bot = sd[p2 + ch] + (sd[p2 + 4 + ch] - sd[p2 + ch]) * fx;
       od[o + ch] = top + (bot - top) * fy;
     }
-    od[o + 3] = 255;
   }
   oc.putImageData(img, 0, 0);
   return out;
 }
-
 
 const cards=["ja/SV/SV8a/010","en/sv/sv03.5/006","ja/SV/SV2a/151","en/swsh/swsh12.5/GG01","zh-tw/SV/SV9/001"];
 const load=u=>new Promise((r,j)=>{const i=new Image();i.crossOrigin="anonymous";i.onload=()=>r(i);i.onerror=()=>r(null);i.src=u;});
@@ -209,18 +262,18 @@ for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.
   const q=loc.map(([x,y])=>({x:cx+x*Math.cos(rot)-y*Math.sin(rot),y:cy+x*Math.sin(rot)+y*Math.cos(rot)}));
   drawQuad(ctx,img,q,t%2);
   const sm=document.createElement("canvas");sm.width=120;sm.height=160;sm.getContext("2d").drawImage(cv,0,0,120,160);
-  const hi=document.createElement("canvas");hi.width=360;hi.height=480;hi.getContext("2d").drawImage(cv,0,0,360,480);
-  const r0=findQuad(sm);
-  const t0=performance.now(),r=findQuad(sm,hi),ms=performance.now()-t0;tt+=ms;n++;
+  const hi=document.createElement("canvas");hi.width=240;hi.height=320;hi.getContext("2d").drawImage(cv,0,0,240,320);
+  const r0=findCard(sm);
+  const t0=performance.now(),r=findQuad(hi),ms=performance.now()-t0;tt+=ms;n++;
   const want=q.map(p=>({x:p.x/W*100,y:p.y/H*100}));
-  const err0=r0?Math.max(...r0.pts.map((p,i)=>Math.hypot(p.x-want[i].x,p.y-want[i].y))):99;
+  const err0=r0?Math.abs(r0.size-fill*100):99;
   const err=r?Math.max(...r.pts.map((p,i)=>Math.hypot(p.x-want[i].x,p.y-want[i].y))):99;
   const good=err<2.5;if(good)ok++;
-  lines.push(`${c} t${t} ${good?"OK ":"BAD"} rot ${(rot*180/Math.PI).toFixed(0)} tilt ${tilt} got deg ${r?r.deg.toFixed(1):"-"} rect ${err0.toFixed(2)} fit ${err.toFixed(2)}% ${ms.toFixed(0)}ms`);
+  lines.push(`${c} t${t} ${good?"OK ":"BAD"} rot ${(rot*180/Math.PI).toFixed(0)} tilt ${tilt} got deg ${r?r.deg.toFixed(1):"-"} oldsize ${err0.toFixed(2)} quad ${err.toFixed(2)}% ${ms.toFixed(0)}ms`);
   if(!good||t==4){const g=cv.getContext("2d");g.strokeStyle="#0f0";g.lineWidth=3;if(r){g.beginPath();r.pts.forEach((p,i)=>{const X=p.x*W/100,Y=p.y*H/100;i?g.lineTo(X,Y):g.moveTo(X,Y);});g.closePath();g.stroke();}
    cv.style.width="150px";document.getElementById("pics").appendChild(cv);
    if(r){const f=flattenQuad(cv,W,H,r.pts.map(p=>({x:p.x*W/100,y:p.y*H/100})),252,352);if(f){f.style.width="110px";document.getElementById("pics").appendChild(f);}}}
  }}
-for(let k=0;k<4;k++){const sm=document.createElement("canvas");sm.width=120;sm.height=160;bg(sm.getContext("2d"),120,160,k,k*31+7);const r=findQuad(sm);lines.push(`empty bg${k}: ${r?"FALSE HIT "+r.score.toFixed(2):"none ok"}`);}
+for(let k=0;k<4;k++){const sm=document.createElement("canvas");sm.width=120;sm.height=160;bg(sm.getContext("2d"),120,160,k,k*31+7);const hi=document.createElement("canvas");hi.width=240;hi.height=320;bg(hi.getContext("2d"),240,320,k,k*31+7);const r=findQuad(hi);lines.push(`empty bg${k}: ${r?"FALSE HIT "+r.score.toFixed(2):"none ok"}`);}
 out.textContent=`${ok}/${n} found, avg ${(tt/n).toFixed(0)}ms\n`+lines.join("\n");document.title="done";})();
 </script>
