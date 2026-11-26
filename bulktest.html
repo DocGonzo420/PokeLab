@@ -3924,6 +3924,7 @@ Store.onChange(() => {
   if ($("#detailSheet").open) renderDetail();
 });
 
+window.__T = () => ({ Cat, Store, cardFromCatalogue });
 (async function boot() {
   $("#filters").hidden = true; $("#empty").hidden = false;
   const cat = loadCatalogue().catch(() => Notices.show("cat", "The card catalogue didn't load, so new cards can't be matched. Reopen the page to try again.", false));
@@ -3944,6 +3945,8 @@ Store.onChange(() => {
 /* TEST ONLY: ?seed=1 adds a handful of English cards so the filters and select mode have something to work on */
 (async () => { try {
   if (!/[?&]seed=1/.test(location.search)) return;
+  for (let i = 0; i < 100 && !window.__T; i++) await new Promise(r => setTimeout(r, 100));
+  const { Cat, Store, cardFromCatalogue } = window.__T();
   for (let i = 0; i < 100 && !(Cat.ready && Store.cards); i++) await new Promise(r => setTimeout(r, 200));
   if (Store.cards.some(c => c.seedTest)) return;
   const pick = (name, setName) => Cat.cards.find(c => c.name === name && (!setName || c.set.name === setName));
