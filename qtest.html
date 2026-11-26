@@ -197,7 +197,7 @@ function findQuad(cv) {
     const area = Math.abs(c.reduce((t, p, k) => t + p.x * c[(k + 1) % 4].y - c[(k + 1) % 4].x * p.y, 0)) / 2;
     cands.push({ c, s, lo, area, long, asp: Math.abs(asp - 63 / 88) });
   }
-  if (!cands.length) return null;
+  window.D={lines,cands,busy:null};if (!cands.length) return null;
   /* A card has a second outline just inside its edge (where the border meets the picture).
      The best outline with such a twin inside it is the card's own edge; a mat or tray behind the card has no twin. */
   const inside = (p, c) => { let sgn = 0; for (let k = 0; k < 4; k++) { const a = c[k], b = c[(k + 1) % 4], z = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x); if (Math.abs(z) < 1e-9) continue; const s = Math.sign(z); if (sgn && s !== sgn) return false; sgn = s; } return true; };
@@ -286,7 +286,7 @@ function findQuad(cv) {
     const x = Math.round(c[0].x + (c[1].x - c[0].x) * u + (c[3].x - c[0].x) * v), y = Math.round(c[0].y + (c[1].y - c[0].y) * u + (c[3].y - c[0].y) * v);
     if (x < 0 || y < 0 || x >= W || y >= H) continue; busy += Math.min(1, mag[y * W + x] / 30); n++;
   }
-  busy = n ? busy / n : 0; if (busy < 0.08) return null;
+  busy = n ? busy / n : 0; window.D.busy=busy; if (busy < 0.08) return null;
   /* order the corners: top side first (the short side higher up), then clockwise */
   const ord = [...c].sort((p, q) => Math.atan2(p.y - cy, p.x - cx) - Math.atan2(q.y - cy, q.x - cx)); /* clockwise on screen */
   const len = k => Math.hypot(ord[k].x - ord[(k + 1) % 4].x, ord[k].y - ord[(k + 1) % 4].y);
@@ -376,7 +376,10 @@ for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.
   const err0=r0?Math.abs(r0.size-fill*100):99;
   const err=r?Math.max(...r.pts.map((p,i)=>Math.hypot(p.x-want[i].x,p.y-want[i].y))):99;
   const good=err<2.5;if(good)ok++;
-  lines.push(`${c} t${t} ${good?"OK ":"BAD"} rot ${(rot*180/Math.PI).toFixed(0)} tilt ${tilt} got deg ${r?r.deg.toFixed(1):"-"} oldsize ${err0.toFixed(2)} quad ${err.toFixed(2)}% ${ms.toFixed(0)}ms`);
+  let rec='';{const Dd=window.D||{lines:[],cands:[]};const qe=c=>Math.max(...want.map(p=>Math.min(...c.map(z=>Math.hypot(z.x/2.4-p.x,z.y/3.2-p.y)))));
+   const cs=Dd.cands.map(k=>({s:k.s,e:qe(k.c)})).sort((a,b)=>b.s-a.s);const bi=cs.reduce((b,k,i)=>(!b||k.e<b.e)?{...k,i}:b,null);
+   rec=` lines ${Dd.lines.length} cands ${cs.length} best ${bi?bi.e.toFixed(1)+'@'+bi.i+' s'+bi.s.toFixed(2):'-'} busy ${Dd.busy==null?'-':Dd.busy.toFixed(2)}`;window.D=null;}
+  lines.push(`${c} t${t} ${good?"OK ":"BAD"} rot ${(rot*180/Math.PI).toFixed(0)} tilt ${tilt} got deg ${r?r.deg.toFixed(1):"-"} oldsize ${err0.toFixed(2)} quad ${err.toFixed(2)}% ${ms.toFixed(0)}ms${rec}`);
   if(!good||t==4){const g=cv.getContext("2d");g.strokeStyle="#0f0";g.lineWidth=3;if(r){g.beginPath();r.pts.forEach((p,i)=>{const X=p.x*W/100,Y=p.y*H/100;i?g.lineTo(X,Y):g.moveTo(X,Y);});g.closePath();g.stroke();}
    cv.style.width="150px";document.getElementById("pics").appendChild(cv);
    if(r){const f=flattenQuad(cv,W,H,r.pts.map(p=>({x:p.x*W/100,y:p.y*H/100})),252,352);if(f){f.style.width="110px";document.getElementById("pics").appendChild(f);}}}
