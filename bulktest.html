@@ -98,10 +98,10 @@ input[type=search],input[type=text],input[type=number],select{width:100%;min-wid
 .gcard.picked .gbtn{outline:3px solid var(--ink);outline-offset:2px}
 .bulkbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:7;width:min(560px,calc(100% - 24px));box-sizing:border-box;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 24px rgb(0 0 0 / .3);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .bulkbar[hidden]{display:none}
-.bulkbar .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.bulkbar .top b{margin-right:auto;font-size:14px}
+.bulkbar .bhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.bulkbar .bhead b{margin-right:auto;font-size:14px}
 .bulkbar .acts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-body.selecting .wrap{padding-bottom:150px}
+body.selecting main.wrap{padding-bottom:150px}
 .row .price{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
 .row .price b{font:700 17px/1 var(--f-display);font-stretch:85%;font-variant-numeric:tabular-nums}
 .row .price span{font-size:11px;color:var(--muted)}
@@ -2147,7 +2147,7 @@ function renderBulkBar() {
   if (!on) return;
   const n = view.sel.size, shown = visibleRows(), allShown = shown.length > 0 && shown.every(c => view.sel.has(c.id));
   const dis = n ? "" : " disabled";
-  bar.innerHTML = `<div class="top"><b role="status">${n ? `${n} card${n === 1 ? "" : "s"} selected` : "Tap cards to select them"}</b>
+  bar.innerHTML = `<div class="bhead"><b role="status">${n ? `${n} card${n === 1 ? "" : "s"} selected` : "Tap cards to select them"}</b>
       ${allShown ? "" : `<button class="btn small" type="button" id="selAll"${shown.length ? "" : " disabled"}>Select all ${shown.length}</button>`}
       ${n ? `<button class="btn small ghost" type="button" id="selNone">Clear</button>` : ""}
       <button class="btn small primary" type="button" id="selDone">Done</button></div>
@@ -3958,6 +3958,5 @@ window.__T = () => ({ Cat, Store, cardFromCatalogue });
  } catch (e) { document.title = "seed err " + (e && e.message); } })();
 setTimeout(() => { if (document.title === 'Poke Lab') document.title = 'seed state ' + (typeof Cat) + ' ' + (window.Cat ? 1 : 0); }, 8000);
 </script>
-
 </body>
 </html>
