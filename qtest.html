@@ -217,9 +217,10 @@ function findQuad(cv) {
     const v = o.s + n.s * 0.3 - (Math.max(...g) - Math.min(...g)) * 4;
     if (!twin || v > twin.v) twin = { k: o, v };
   }
-  if (twin) best = twin.k;
+  window.TW=twin;if (twin) best = twin.k;
   else for (const k of cands) if (k.asp < 0.06 && (!best || k.s > best.s)) best = k;
   if (!best) return null;
+  window.B0=best;
   /* a card lying on a mat, or in a sleeve or top loader: the card is the smaller outline inside the bigger one */
   if (!twin) {
     let inner = null;
@@ -228,6 +229,7 @@ function findQuad(cv) {
       if (!n.c.every(p => inside(p, best.c))) continue;
       if (!inner || n.s > inner.s + 0.02 || (n.s > inner.s - 0.02 && n.area > inner.area)) inner = n;
     }
+    window.IN=inner;
     if (inner) {
       best = inner;
       for (const n of cands) {   /* that card's own border twin, if any: the outer of the two is the card's edge */
@@ -416,13 +418,13 @@ for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.
     rep.push(`side${k} th${ti} edge ${(ne/n).toFixed(2)} dang ${(ne?da/ne*180/Math.PI:0).toFixed(1)} step ${(ne?st/ne:0).toFixed(0)} mag ${(mg/n).toFixed(0)} acc[${av.join(',')}] raw ${raw.join(' ')}`);}
    out.textContent="PROBE\n"+rep.join("\n");document.title="done";return;}continue;}
   const r0=findCard(sm);
-  const t0=performance.now(),r=findQuad(hi),ms=performance.now()-t0;tt+=ms;n++;
+  window.TW=null;window.IN=null;window.B0=null;const t0=performance.now(),r=findQuad(hi),ms=performance.now()-t0;tt+=ms;n++;
     const err0=r0?Math.abs(r0.size-fill*100):99;
   const err=r?Math.max(...r.pts.map((p,i)=>Math.hypot(p.x-want[i].x,p.y-want[i].y))):99;
   const good=err<2.5;if(good)ok++;
   let rec='';{const Dd=window.D||{lines:[],cands:[]};const qe=c=>Math.max(...want.map(p=>Math.min(...c.map(z=>Math.hypot(z.x/2.4-p.x,z.y/3.2-p.y)))));
    const cs=Dd.cands.map(k=>({s:k.s,e:qe(k.c)})).sort((a,b)=>b.s-a.s);const bi=cs.reduce((b,k,i)=>(!b||k.e<b.e)?{...k,i}:b,null);
-   rec=` lines ${Dd.lines.length} cands ${cs.length} best ${bi?bi.e.toFixed(1)+'@'+bi.i+' s'+bi.s.toFixed(2):'-'} busy ${Dd.busy==null?'-':Dd.busy.toFixed(2)} E ${JSON.stringify(window.E)}`;window.D=null;}
+   rec=` lines ${Dd.lines.length} cands ${cs.length} best ${bi?bi.e.toFixed(1)+'@'+bi.i+' s'+bi.s.toFixed(2):'-'} busy ${Dd.busy==null?'-':Dd.busy.toFixed(2)} E ${JSON.stringify(window.E)} tw ${window.TW?qe(window.TW.k.c).toFixed(1):'-'} b0 ${window.B0?qe(window.B0.c).toFixed(1):'-'} in ${window.IN?qe(window.IN.c).toFixed(1):'-'}`;window.D=null;}
   lines.push(`${c} t${t} ${good?"OK ":"BAD"} rot ${(rot*180/Math.PI).toFixed(0)} tilt ${tilt} got deg ${r?r.deg.toFixed(1):"-"} oldsize ${err0.toFixed(2)} quad ${err.toFixed(2)}% ${ms.toFixed(0)}ms${rec}`);
   if(!good||t==4){const g=cv.getContext("2d");g.strokeStyle="#0f0";g.lineWidth=3;if(r){g.beginPath();r.pts.forEach((p,i)=>{const X=p.x*W/100,Y=p.y*H/100;i?g.lineTo(X,Y):g.moveTo(X,Y);});g.closePath();g.stroke();}
    cv.style.width="150px";document.getElementById("pics").appendChild(cv);
