@@ -71,7 +71,7 @@ button,input,select{font:inherit;color:inherit}
 .filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
 .filters .search{grid-column:1/-1}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}
-.field label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.field label,.field .flabel{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
 input[type=search],input[type=text],input[type=number],select{width:100%;min-width:0;height:42px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface)}
 @media (min-width:620px){.filters{grid-template-columns:2fr 1fr 1fr 1fr}.filters .search{grid-column:auto}}
 
@@ -174,6 +174,26 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .scan-focus{position:absolute;width:60px;height:60px;margin:-30px 0 0 -30px;border:2px solid #ffd36b;border-radius:50%;opacity:0;transform:scale(1.4);transition:opacity .25s,transform .25s;pointer-events:none}
 .scan-focus.on{opacity:1;transform:scale(1)}
 .scan-ctl{display:grid;gap:8px;margin:0}
+.strip-wrap{width:100%;max-width:440px;margin:0 auto;display:grid;gap:8px}
+.strip-wrap:empty{display:none}
+.filmstrip{list-style:none;margin:0;padding:4px 2px 6px;display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+.filmstrip li{flex:0 0 auto;scroll-snap-align:start}
+.fs-card{position:relative;display:block;width:58px;aspect-ratio:63/88;padding:0;border:2px solid var(--line);border-radius:7px;overflow:hidden;background:var(--sunk);cursor:pointer;-webkit-touch-callout:none;user-select:none;-webkit-user-select:none;touch-action:pan-x}
+.fs-card img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.fs-card .fs-ph{position:absolute;inset:0;display:grid;place-items:center;padding:3px;font-size:9px;line-height:1.1;text-align:center;color:var(--muted)}
+.fs-card .fs-q{position:absolute;right:2px;bottom:2px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:rgb(0 0 0 / .72);color:#fff;font:700 11px/18px var(--f-body,system-ui);text-align:center}
+.fs-card[aria-expanded="true"]{border-color:var(--ink);box-shadow:0 0 0 2px var(--ink)}
+.fs-card.new{animation:fsIn .5s cubic-bezier(.2,.8,.2,1)}
+.fs-card.new::after{content:"✓";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--ok);color:#fff;font:700 12px/18px system-ui;text-align:center;animation:fsTick 1.6s ease forwards}
+@keyframes fsIn{from{transform:translateX(-70px) scale(.7);opacity:0}to{transform:none;opacity:1}}
+@keyframes fsTick{0%,70%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.fs-card.new{animation:none}.fs-card.new::after{animation:none;opacity:0}}
+.fs-panel{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:10px 12px;display:grid;gap:8px}
+.fs-panel .fs-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.fs-panel .fs-head b{font-size:15px}
+.fs-acts{display:flex;gap:8px;flex-wrap:wrap}
+.fs-qty{display:flex;align-items:center;gap:8px}
+.fs-qty output{min-width:2ch;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
 .seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:11px;overflow:hidden;width:100%;max-width:440px;margin:0 auto}
 .seg button{height:42px;border:0;background:var(--surface);color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
 .seg button+button{border-left:1px solid var(--line)}
@@ -1182,7 +1202,7 @@ function ocrWorker(onStatus) {
   return OCR.loading;
 }
 /* live camera scan: reads the collector number from the video, like a barcode scanner */
-const Scan = { stream: null, track: null, run: 0, torch: false, caps: {}, focusTimer: 0, toldFocus: false, skipKey: "", skipSeen: 0, added: 0, lastName: "" };
+const Scan = { stream: null, track: null, run: 0, torch: false, caps: {}, focusTimer: 0, toldFocus: false, skipKey: "", skipSeen: 0, added: 0, lastName: "", recent: [], fresh: "", hold: false };
 const scanKey = n => String(n || "").replace(/[^0-9A-Z\/]/gi, "").toUpperCase();
 function scanAddedMsg() { return `Added ${Scan.lastName}${Scan.added > 1 ? ` (${Scan.added} so far)` : ""}. Put the next card in the frame${scanShotMode() ? " and tap Scan card" : ""}.`; }
 const scanShotMode = () => ScanPrefs.mode === "shot";
@@ -1882,7 +1902,7 @@ async function scanLoop(run) {
   let started = Date.now(), last = "", warned = false;
   Scan.skipSeen = Date.now();
   while (run === Scan.run) {
-    if (document.hidden || video.readyState < 2) { await pause(300); continue; }
+    if (document.hidden || video.readyState < 2 || Scan.hold) { await pause(300); continue; }
     const card = scanCrop(video, box, frame); if (!card) { await pause(200); continue; }
     let r = null, text = "";
     try { Scan.alt = !Scan.alt; text = ((await w.recognize(firstStrip(card, Scan.alt))).data.text) || ""; r = matchOCR(text); } catch (e) {}
@@ -2497,7 +2517,7 @@ function resetAdd() { Object.assign(add, { manualName: null, manualNum: null, bl
 resetAdd();
 const CONDS = [["", "Not set"], ["9", "Near Mint, looks perfect (about 9)"], ["8", "Near Mint, tiny flaw (about 8)"], ["6", "Lightly played (about 6)"], ["4", "Moderately played (about 4)"], ["2", "Heavily played or damaged (about 2)"]];
 const condOptions = g => CONDS.map(([v, l]) => `<option value="${v}" ${String(g ?? "") === v ? "selected" : ""}>${l}</option>`).join("");
-function openAdd() { if (collById(view.coll)) setAddTo(view.coll); stopScan(); binderClear(); Object.assign(Scan, { skipKey: "", added: 0, lastName: "" }); resetAdd(); renderAdd(); $("#addSheet").showModal(); }
+function openAdd() { if (collById(view.coll)) setAddTo(view.coll); stopScan(); binderClear(); Object.assign(Scan, { skipKey: "", added: 0, lastName: "", recent: [], fresh: "", hold: false }); Strip.sel = ""; resetAdd(); renderAdd(); $("#addSheet").showModal(); }
 $("#addSheet").addEventListener("close", () => { stopScan(); binderClear(); });
 function renderAdd() {
   const b = $("#addBody");
@@ -2513,6 +2533,7 @@ function renderAdd() {
   if (add.step === "scan") {
     b.innerHTML = `
       <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view. Tap to focus."></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div><svg class="scan-quad" id="scanQuad" aria-hidden="true"><path class="q-mask" fill="rgba(0,0,0,.45)" fill-rule="evenodd"/><path class="q-halo" fill="none" stroke="rgba(0,0,0,.7)" stroke-width="8" stroke-linejoin="round"/><path class="q-card" fill="none" stroke="#ffd54a" stroke-width="4" stroke-linejoin="round"/><path class="q-num" fill="none" stroke="#ffd36b" stroke-width="2" stroke-dasharray="6 4"/></svg><span class="scan-focus" id="scanFocus" aria-hidden="true"></span></div>
+      <div class="strip-wrap" id="stripWrap"></div>
       <div class="seg" role="group" aria-label="Scan mode"><button type="button" data-smode="auto" aria-pressed="${!scanShotMode()}">Continuous</button><button type="button" data-smode="shot" aria-pressed="${scanShotMode()}">Single shot</button></div>
       <p class="muted" id="scanHint" role="status" style="margin:0">${Scan.added ? esc(scanAddedMsg()) : "Starting the camera…"}</p>
       <div class="field"><label for="langSel">Card language</label><select id="langSel">${LANGS.filter(x => x[0] !== "other").map(([k, l]) => `<option value="${k}" ${k === scanLang() ? "selected" : ""}>${l}</option>`).join("")}</select><p class="src" id="langNote" style="margin:4px 0 0"></p></div>
@@ -2529,7 +2550,7 @@ function renderAdd() {
         <button class="btn" type="button" id="scanTorch" aria-pressed="${Scan.torch}">${Scan.torch ? "Flash on" : "Flash off"}</button>
         <button class="btn" type="button" id="scanBack">${Scan.added ? "Done" : "Back"}</button>
       </div>`;
-    placeFrame(); scanPointer($("#scanBox")); wireLang(b); wireAddTo(b);
+    placeFrame(); scanPointer($("#scanBox")); wireLang(b); wireAddTo(b); wireStrip(); renderStrip();
     $("#scanSize").addEventListener("input", e => { ScanPrefs.size = Number(e.target.value); placeFrame(); Scan.userMoved = Date.now(); });
     $("#scanAuto").addEventListener("change", e => { ScanPrefs.auto = e.target.checked; saveScanPrefs(); if (!ScanPrefs.auto) $("#scanBox").classList.remove("found"); });
     $("#scanSize").addEventListener("change", saveScanPrefs);
@@ -2789,7 +2810,8 @@ async function saveAdd(c, btn) {
     priceNew([rec]);
     if (add.ocr && add.ocr.live && scanUsable()) {
       /* straight back to the camera for the next card */
-      Object.assign(Scan, { skipKey: add.ocr.key || "", added: Scan.added + 1, lastName: c.name });
+      Object.assign(Scan, { skipKey: add.ocr.key || "", added: Scan.added + 1, lastName: c.name, fresh: rec.id });
+      Scan.recent.unshift({ id: rec.id, alts: (add.cands || []).slice(0, 12) }); Scan.recent.length = Math.min(Scan.recent.length, 60); Strip.sel = ""; Scan.hold = false;
       if (add.url) URL.revokeObjectURL(add.url);
       resetAdd(); startScan();
       return;
@@ -2800,6 +2822,103 @@ async function saveAdd(c, btn) {
     add.saving = false; btn.textContent = label;
     add.err = e && e.code === "quota_exceeded" ? "Your collection store is full." : "That card couldn't be saved. Try again."; renderAdd();
   }
+}
+/* ---------- film strip: the cards added from the camera, newest first ----------
+   Tap one to change its printing, finish or copies; press and hold for quick add-a-copy or remove. */
+const Strip = { sel: "", mode: "" };
+function stripEntries() { return Scan.recent.map(e => ({ e, c: Store.cards.find(x => x.id === e.id) })).filter(x => x.c); }
+function stripOpen(id, mode) {
+  Strip.sel = id && mode ? id : ""; Strip.mode = Strip.sel ? mode : "";
+  Scan.hold = !!Strip.sel; renderStrip();
+  const f = $("#stripWrap .fs-panel button, #stripWrap .fs-panel select"); if (f && Strip.sel) f.focus({ preventScroll: true });
+}
+function renderStrip() {
+  const wrap = $("#stripWrap"); if (!wrap) return;
+  const list = stripEntries();
+  if (!list.length) { wrap.innerHTML = ""; Strip.sel = ""; Scan.hold = false; return; }
+  if (Strip.sel && !list.some(x => x.c.id === Strip.sel)) { Strip.sel = ""; Scan.hold = false; }
+  const keep = wrap.querySelector(".filmstrip"), left = keep ? keep.scrollLeft : 0;
+  const items = list.map(({ c }) => {
+    const img = recImage(c) || photoCache.get(c.id) || "";
+    const q = c.qty > 1 ? `<span class="fs-q">×${c.qty}</span>` : "";
+    const label = `${c.name}, ${c.setCode || c.setId || ""} ${c.number}${c.qty > 1 ? `, ${c.qty} copies` : ""}`;
+    return `<li><button type="button" class="fs-card${c.id === Scan.fresh ? " new" : ""}" data-fs="${esc(c.id)}" aria-expanded="${c.id === Strip.sel}" aria-label="${esc(label)}">${img ? `<img src="${esc(img)}" alt="" data-fail="ph">` : `<span class="fs-ph">${esc(c.name)}</span>`}${q}</button></li>`;
+  }).join("");
+  const sel = list.find(x => x.c.id === Strip.sel);
+  wrap.innerHTML = `<ol class="filmstrip" aria-label="Cards scanned so far, newest first. Tap one to change it, or press and hold.">${items}</ol>${sel ? stripPanel(sel.c, sel.e) : ""}`;
+  const fs = wrap.querySelector(".filmstrip"); fs.scrollLeft = Scan.fresh ? 0 : left;
+  Scan.fresh = "";
+  wrap.querySelectorAll("img[data-fail]").forEach(im => im.addEventListener("error", () => { const c = Store.cards.find(x => x.id === im.closest("[data-fs]").dataset.fs); im.replaceWith(Object.assign(document.createElement("span"), { className: "fs-ph", textContent: c ? c.name : "" })); }, { once: true }));
+  for (const { c } of list) if (!recImage(c) && c.photo && !photoCache.has(c.id)) photoFor(c).then(u => { if (u) renderStrip(); }).catch(() => {});
+}
+function stripPanel(c, e) {
+  const where = `${esc(c.setName || "")} · <span class="mono">${esc(c.setCode || c.setId || "")} ${esc(c.number)}</span>`;
+  const rar = c.rarity ? `<span class="chip t-${tier(c.rarity)}">${esc(c.rarity)}</span>` : "";
+  if (Strip.mode === "menu") return `<div class="fs-panel" role="group" aria-label="${esc(c.name)}">
+      <div class="fs-head"><b>${esc(c.name)}</b><span class="muted">${c.qty > 1 ? `${c.qty} copies` : "1 copy"}</span></div>
+      <div class="fs-acts">
+        <button class="btn small primary" type="button" data-fsact="plus">Add a copy</button>
+        ${c.qty > 1 ? `<button class="btn small" type="button" data-fsact="minus">One less</button>` : ""}
+        <button class="btn small danger" type="button" data-fsact="remove">Remove</button>
+        <button class="btn small ghost" type="button" data-fsact="close">Close</button>
+      </div></div>`;
+  const alts = (e.alts || []).filter(a => a && a.id);
+  const cur = alts.some(a => a.id === c.cardId) ? c.cardId : "";
+  const printing = alts.length > 1 ? `<div class="field"><label for="fsPrint">Printing</label><select id="fsPrint">${cur ? "" : `<option value="" selected>${esc(c.setName || "")} ${esc(c.number)}${c.rarity ? ", " + esc(c.rarity) : ""}</option>`}${alts.map(a => `<option value="${esc(a.id)}" ${a.id === cur ? "selected" : ""}>${esc((a.set && (a.set.name || a.set.code)) || a.setName || a.setCode || "")} ${esc(a.number || "")}${a.rarity ? ", " + esc(a.rarity) : ""}${a.name && a.name !== c.name ? " (" + esc(a.name) + ")" : ""}</option>`).join("")}</select></div>` : "";
+  return `<div class="fs-panel" role="group" aria-label="Change ${esc(c.name)}">
+      <div class="fs-head"><b>${esc(c.name)}</b>${rar}</div>
+      <div class="muted" style="font-size:13px">${where}</div>
+      ${printing}
+      <div class="grid2">
+        <div class="field"><label for="fsFin">Finish</label><select id="fsFin">${FINISHES.map(([k, l]) => `<option value="${k}" ${k === c.finish ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+        <div class="field"><span class="flabel" id="fsQtyL">Copies</span><div class="fs-qty" role="group" aria-labelledby="fsQtyL"><button class="btn small" type="button" data-fsact="minus" ${c.qty > 1 ? "" : "disabled"} aria-label="One less copy">−</button><output aria-live="polite">${c.qty || 1}</output><button class="btn small" type="button" data-fsact="plus" aria-label="Add a copy">+</button></div></div>
+      </div>
+      ${alts.length > 1 ? "" : `<p class="src" style="margin:0">Rarity comes with the printing. If this is the wrong card, remove it and scan again.</p>`}
+      <div class="fs-acts"><button class="btn small primary" type="button" data-fsact="close">Done</button><button class="btn small danger" type="button" data-fsact="remove">Remove</button></div>
+    </div>`;
+}
+async function stripAct(act) {
+  const c = Store.cards.find(x => x.id === Strip.sel); if (!c) { stripOpen(""); return; }
+  const hint = $("#scanHint");
+  if (act === "close") { stripOpen(""); return; }
+  if (act === "plus" || act === "minus") { await Store.put({ ...c, qty: Math.max(1, Math.min(999, (c.qty || 1) + (act === "plus" ? 1 : -1))) }); renderStrip(); return; }
+  if (act === "remove") {
+    await Store.remove(c); photoCache.delete(c.id);
+    Scan.recent = Scan.recent.filter(e => e.id !== c.id); Scan.added = Math.max(0, Scan.added - 1);
+    if (Scan.skipKey) Scan.skipKey = "";
+    stripOpen("");
+    if (hint) hint.textContent = `Removed ${c.name}. Put the next card in the frame${scanShotMode() ? " and tap Scan card" : ""}.`;
+  }
+}
+async function stripChange(el) {
+  const c = Store.cards.find(x => x.id === Strip.sel); if (!c) return;
+  if (el.id === "fsFin") { await Store.put({ ...c, finish: el.value }); renderStrip(); return; }
+  if (el.id === "fsPrint" && el.value) {
+    const e = Scan.recent.find(x => x.id === c.id); const a = e && (e.alts || []).find(x => x.id === el.value); if (!a) return;
+    if (a.lang) Cat.byId.set(a.id, a);
+    const n = { ...c, ...cardFromCatalogue(a), id: c.id, finish: c.finish, qty: c.qty, condition: c.condition, photo: c.photo, read: c.read, addedAt: c.addedAt, price: a.manual ? c.price : null };
+    if (c.coll) n.coll = c.coll;
+    await Store.put(n); priceNew([n]); renderStrip();
+  }
+}
+function wireStrip() {
+  const wrap = $("#stripWrap"); if (!wrap) return;
+  let timer = 0, sx = 0, sy = 0, longId = "";
+  const cancel = () => { clearTimeout(timer); timer = 0; };
+  wrap.addEventListener("pointerdown", e => {
+    const b = e.target.closest("[data-fs]"); if (!b) return;
+    sx = e.clientX; sy = e.clientY; longId = ""; cancel();
+    timer = setTimeout(() => { timer = 0; longId = b.dataset.fs; try { navigator.vibrate && navigator.vibrate(25); } catch (x) {} stripOpen(longId, "menu"); }, 450);
+  });
+  wrap.addEventListener("pointermove", e => { if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) cancel(); });
+  wrap.addEventListener("pointerup", cancel); wrap.addEventListener("pointercancel", cancel);
+  wrap.addEventListener("contextmenu", e => { if (e.target.closest("[data-fs]")) e.preventDefault(); });
+  wrap.addEventListener("click", e => {
+    const b = e.target.closest("[data-fs]");
+    if (b) { if (longId && longId === b.dataset.fs) { longId = ""; return; } const id = b.dataset.fs; stripOpen(id, Strip.sel === id && Strip.mode === "edit" ? "" : "edit"); return; }
+    const a = e.target.closest("[data-fsact]"); if (a && !a.disabled) stripAct(a.dataset.fsact);
+  });
+  wrap.addEventListener("change", e => { if (e.target.matches("#fsFin, #fsPrint")) stripChange(e.target); });
 }
 function slabHtml(cond) {
   if (!cond || (cond.grade == null && !cond.centering)) return "";
