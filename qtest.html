@@ -220,6 +220,22 @@ function findQuad(cv) {
   if (twin) best = twin.k;
   else for (const k of cands) if (k.asp < 0.06 && (!best || k.s > best.s)) best = k;
   if (!best) return null;
+  /* a card lying on a mat, or in a sleeve or top loader: the card is the smaller outline inside the bigger one */
+  {
+    let inner = null;
+    for (const n of cands) {
+      if (n === best || n.area > best.area * 0.75 || n.s < 0.8 || n.s < best.s - 0.15 || n.asp > 0.08) continue;
+      if (!n.c.every(p => inside(p, best.c))) continue;
+      if (!inner || n.s > inner.s + 0.02 || (n.s > inner.s - 0.02 && n.area > inner.area)) inner = n;
+    }
+    if (inner) {
+      best = inner;
+      for (const n of cands) {   /* that card's own border twin, if any: the outer of the two is the card's edge */
+        if (n === inner || n.area < inner.area || n.area > inner.area * 1.45 || !inner.c.every(p => inside(p, n.c))) continue;
+        const g = gaps(n, inner); if (Math.min(...g) >= 0.012 && Math.max(...g) <= 0.09 && n.s >= 0.8) { best = n; break; }
+      }
+    }
+  }
   /* A side sitting on the inside edge of the card's border has the border's own outer edge just outside it, with a
      band of plain border colour in between, the same colour that lies just inside the sides that are already right.
      Move such sides out to the card's real edge. */
