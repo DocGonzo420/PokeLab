@@ -374,10 +374,12 @@ for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.
   drawQuad(ctx,img,q,t%2);
   const sm=document.createElement("canvas");sm.width=120;sm.height=160;sm.getContext("2d").drawImage(cv,0,0,120,160);
   const hi=shrinkTo(cv,240,320);
+  const want=q.map(p=>({x:p.x/W*100,y:p.y/H*100}));
+  const DUMP=new URLSearchParams(location.search).get("dump");
+  if(DUMP){if(DUMP===c+":"+t){out.textContent="DUMP "+JSON.stringify(want)+" "+hi.toDataURL("image/jpeg",0.93);document.title="done";return;}continue;}
   const r0=findCard(sm);
   const t0=performance.now(),r=findQuad(hi),ms=performance.now()-t0;tt+=ms;n++;
-  const want=q.map(p=>({x:p.x/W*100,y:p.y/H*100}));
-  const err0=r0?Math.abs(r0.size-fill*100):99;
+    const err0=r0?Math.abs(r0.size-fill*100):99;
   const err=r?Math.max(...r.pts.map((p,i)=>Math.hypot(p.x-want[i].x,p.y-want[i].y))):99;
   const good=err<2.5;if(good)ok++;
   let rec='';{const Dd=window.D||{lines:[],cands:[]};const qe=c=>Math.max(...want.map(p=>Math.min(...c.map(z=>Math.hypot(z.x/2.4-p.x,z.y/3.2-p.y)))));
