@@ -126,6 +126,7 @@ function findQuad(cv) {
     }
     if (peak) lines.push({ t: t * Math.PI / NT, r: r - D, v });
   }
+  window.I={edge,ang,step,mag,acc,NR,D,W,H};
   { let ne=0, ma=0; for (let i=0;i<W*H;i++) ne+=edge[i]; for (let i=0;i<acc.length;i++) if(acc[i]>ma) ma=acc[i]; window.E={ne,ma:ma.toFixed(0),raw:lines.length}; }
   lines.sort((a, b) => b.v - a.v);
   { /* keep the strongest lines, but no more than 7 running the same way, so a striped table can't crowd out the card */
@@ -376,7 +377,14 @@ for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.
   const hi=shrinkTo(cv,240,320);
   const want=q.map(p=>({x:p.x/W*100,y:p.y/H*100}));
   const DUMP=new URLSearchParams(location.search).get("dump");
-  if(DUMP){if(DUMP===c+":"+t){out.textContent="DUMP "+JSON.stringify(want)+" "+hi.toDataURL("image/jpeg",0.93);document.title="done";return;}continue;}
+  if(DUMP){if(DUMP===c+":"+t){findQuad(hi);const I=window.I,P=want.map(p=>({x:p.x*2.4,y:p.y*3.2}));let rep=[];
+   for(let k=0;k<4;k++){const a=P[k],b=P[(k+1)%4],len=Math.hypot(b.x-a.x,b.y-a.y),na=Math.atan2(b.x-a.x,-(b.y-a.y));let ne=0,n=0,da=0,st=0,mg=0,raw=[];
+    for(let u=0.1;u<=0.9;u+=1/len){n++;const x=a.x+(b.x-a.x)*u,y=a.y+(b.y-a.y)*u;let f=null;for(let o=-1.5;o<=1.5;o+=0.5){const xi=Math.round(x-(b.y-a.y)/len*o),yi=Math.round(y+(b.x-a.x)/len*o),i=yi*I.W+xi;if(I.edge[i]){f=i;break;}}
+     const i0=Math.round(y)*I.W+Math.round(x);mg+=I.mag[i0];if(raw.length<6&&n%15==0)raw.push((I.ang[i0]*180/Math.PI).toFixed(0)+'/'+I.mag[i0].toFixed(0));
+     if(f!=null){ne++;let d=Math.abs(I.ang[f]-na)%Math.PI;if(d>Math.PI/2)d=Math.PI-d;da+=d;st+=I.step[f];}}
+    let th=na%Math.PI;if(th<0)th+=Math.PI;const ti=Math.round(th*180/Math.PI)%180,r=Math.round(a.x*Math.cos(ti*Math.PI/180)+a.y*Math.sin(ti*Math.PI/180));let av=[];for(let dr=-3;dr<=3;dr++)av.push(I.acc[ti*I.NR+r+dr+I.D].toFixed(0));
+    rep.push(`side${k} th${ti} edge ${(ne/n).toFixed(2)} dang ${(ne?da/ne*180/Math.PI:0).toFixed(1)} step ${(ne?st/ne:0).toFixed(0)} mag ${(mg/n).toFixed(0)} acc[${av.join(',')}] raw ${raw.join(' ')}`);}
+   out.textContent="PROBE\n"+rep.join("\n");document.title="done";return;}continue;}
   const r0=findCard(sm);
   const t0=performance.now(),r=findQuad(hi),ms=performance.now()-t0;tt+=ms;n++;
     const err0=r0?Math.abs(r0.size-fill*100):99;
