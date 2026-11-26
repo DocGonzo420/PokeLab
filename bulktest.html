@@ -3942,7 +3942,7 @@ Store.onChange(() => {
 <script>if("serviceWorker" in navigator&&location.protocol==="https:"){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script>
 <script>
 /* TEST ONLY: ?seed=1 adds a handful of English cards so the filters and select mode have something to work on */
-(async () => {
+(async () => { try {
   if (!/[?&]seed=1/.test(location.search)) return;
   for (let i = 0; i < 100 && !(Cat.ready && Store.cards); i++) await new Promise(r => setTimeout(r, 200));
   if (Store.cards.some(c => c.seedTest)) return;
@@ -3952,7 +3952,8 @@ Store.onChange(() => {
   want.forEach(([n, s], i) => { const c = pick(n, s) || pick(n); if (!c) { console.log("seed missing", n); return; }
     recs.push({ id: "card_seed" + i, ...cardFromCatalogue(c), finish: "normal", qty: 1, condition: null, photo: null, read: null, addedAt: now - i * 1000, price: null, seedTest: 1 }); });
   await Store.putMany(recs); document.title = "seeded " + recs.length;
-})();
+ } catch (e) { document.title = "seed err " + (e && e.message); } })();
+setTimeout(() => { if (document.title === 'Poke Lab') document.title = 'seed state ' + (typeof Cat) + ' ' + (window.Cat ? 1 : 0); }, 8000);
 </script>
 
 </body>
