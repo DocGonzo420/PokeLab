@@ -1,0 +1,224 @@
+<!doctype html><meta charset=utf8><meta name=viewport content="width=device-width"><title>quad test</title><body style="font:13px monospace;background:#222;color:#eee"><pre id=out>running</pre><div id=pics></div><script>
+function findCard(cv) {
+  const W = cv.width, H = cv.height, d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  /* colour edges, so a yellow border on a white stand still shows */
+  const CAP = 40, gx = new Float32Array(W * H), gy = new Float32Array(W * H), diff = (a, b) => Math.max(Math.abs(d[a] - d[b]), Math.abs(d[a + 1] - d[b + 1]), Math.abs(d[a + 2] - d[b + 2]));
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x, j = i * 4;
+    gx[i] = Math.min(CAP, diff(j + 4, j - 4)) / CAP;
+    gy[i] = Math.min(CAP, diff(j + W * 4, j - W * 4)) / CAP;
+  }
+  /* allow a pixel of slack across each edge, then prefix sums along rows (top/bottom) and columns (sides) */
+  const row = new Float32Array(H * (W + 1)), col = new Float32Array(W * (H + 1));
+  for (let y = 1; y < H - 1; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, e = Math.max(gy[i], gy[i - W], gy[i + W]);
+    row[y * (W + 1) + x + 1] = row[y * (W + 1) + x] + e;
+  }
+  for (let x = 1; x < W - 1; x++) for (let y = 0; y < H; y++) {
+    const i = y * W + x, e = Math.max(gx[i], gx[i - 1], gx[i + 1]);
+    col[x * (H + 1) + y + 1] = col[x * (H + 1) + y] + e;
+  }
+  const hl = (y, x1, x2) => (row[y * (W + 1) + x2] - row[y * (W + 1) + x1]) / (x2 - x1);
+  const vl = (x, y1, y2) => (col[x * (H + 1) + y2] - col[x * (H + 1) + y1]) / (y2 - y1);
+  const rate = (x1, y1, w, h) => {
+    const x2 = x1 + w, y2 = y1 + h, m = 0.08;
+    /* skip the rounded corners */
+    const ix = Math.round(w * m), iy = Math.round(h * m);
+    const t = hl(y1, x1 + ix, x2 - ix), b = hl(y2, x1 + ix, x2 - ix), l = vl(x1, y1 + iy, y2 - iy), r = vl(x2, y1 + iy, y2 - iy);
+    const lo = Math.min(t, b, l, r);
+    return { s: (t + b + l + r) / 4 * 0.7 + lo * 0.3 + 0.06 * h / H, lo };
+  };
+  let best = null;
+  const tryBox = (x1, y1, w, h) => {
+    if (x1 < 1 || y1 < 1 || x1 + w > W - 2 || y1 + h > H - 2) return;
+    const r = rate(x1, y1, w, h); if (!best || r.s > best.s) best = { ...r, x: x1, y: y1, w, h };
+  };
+  for (let h = Math.round(H * 0.42); h <= H - 3; h += 2) for (const a of [0.94, 1, 1.06]) {
+    const w = Math.round(h * 63 / 88 * a); if (w > W - 3) continue;
+    for (let y = 1; y + h <= H - 2; y += 2) for (let x = 1; x + w <= W - 2; x += 2) tryBox(x, y, w, h);
+  }
+  if (!best) return null;
+  const refine = () => { const c = best; for (let dh = -2; dh <= 2; dh++) for (let dw = -2; dw <= 2; dw++) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) tryBox(c.x + dx, c.y + dy, c.w + dw, c.h + dh); };
+  refine();
+  /* a card's inner border is a rectangle too: take the biggest strong rectangle around the best one */
+  /* (only a little bigger: a tray or stand around the card is a rectangle too) */
+  const inner = best, floor = inner.s * 0.94;
+  let outer = null;
+  for (let h = inner.h + 3; h <= Math.min(H - 3, inner.h * 1.16); h += 2) for (const a of [0.94, 1, 1.06]) {
+    const w = Math.round(h * 63 / 88 * a);
+    for (let y = Math.max(1, inner.y + inner.h - h); y <= inner.y; y += 2) for (let x = Math.max(1, inner.x + inner.w - w); x <= inner.x; x += 2) {
+      if (x + w > W - 2 || y + h > H - 2) continue;
+      const r = rate(x, y, w, h);
+      if (r.s >= floor && r.lo >= 0.3 && (!outer || h > outer.h || (h === outer.h && r.s > outer.s))) outer = { ...r, x, y, w, h };
+    }
+  }
+  if (outer) { best = outer; refine(); }
+  if (best.s < 0.6 || best.lo < 0.3) return null;
+  /* a card has print inside it; an empty tray or shadow does not */
+  let busy = 0, n = 0;
+  for (let y = best.y + Math.round(best.h * 0.1); y < best.y + best.h * 0.9; y += 2) for (let x = best.x + Math.round(best.w * 0.1); x < best.x + best.w * 0.9; x += 2) { const i = y * W + x; busy += Math.max(gx[i], gy[i]); n++; }
+  best.busy = busy / n;
+  if (best.busy < 0.06) return null;
+  return { cx: (best.x + best.w / 2) / W * 100, cy: (best.y + best.h / 2) / H * 100, size: best.h / H * 100, score: best.s, busy: best.busy, box: { x: best.x, y: best.y, w: best.w, h: best.h } };
+}
+
+/* ---------- a turned or tilted card: four corners instead of a straight box ----------
+   findQuad turns the small picture in steps and keeps the angle where findCard's straight box fits best,
+   then nudges each corner on a sharper copy until the four sides sit on the card's edges (a tilted card
+   is a little narrower at the far end). Corners come back in % of the picture: top left, top right,
+   bottom right, bottom left. */
+const QUAD_ANGLES = [0, -5, 5, -10, 10, -15, 15, -20, 20, -26, 26];
+function turnedCopy(cv, deg, fill) {
+  const W = cv.width, H = cv.height, c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.fillStyle = fill; x.fillRect(0, 0, W, H);
+  x.translate(W / 2, H / 2); x.rotate(-deg * Math.PI / 180); x.drawImage(cv, -W / 2, -H / 2);
+  return c;
+}
+function meanFill(cv) {
+  const d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, cv.width, cv.height).data;
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < d.length; i += 16) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+  return `rgb(${r / n | 0},${g / n | 0},${b / n | 0})`;
+}
+function findQuad(cv, hi) {
+  const W = cv.width, H = cv.height, fill = meanFill(cv);
+  const look = deg => { const r = findCard(deg ? turnedCopy(cv, deg, fill) : cv); return r ? { ...r, deg } : null; };
+  let best = null;
+  for (const a of QUAD_ANGLES) { const r = look(a); if (r && (!best || r.score > best.score)) best = r; }
+  if (!best) return null;
+  for (const step of [2.5, 1.2]) for (const a of [best.deg - step, best.deg + step]) {
+    if (Math.abs(a) > 30) continue;
+    const r = look(a); if (r && r.score > best.score) best = r;
+  }
+  /* the straight box's corners, turned back */
+  const t = best.deg * Math.PI / 180, cs = Math.cos(t), sn = Math.sin(t), b = best.box;
+  const back = (x, y) => ({ x: (x - W / 2) * cs - (y - H / 2) * sn + W / 2, y: (x - W / 2) * sn + (y - H / 2) * cs + H / 2 });
+  let pts = [back(b.x, b.y), back(b.x + b.w, b.y), back(b.x + b.w, b.y + b.h), back(b.x, b.y + b.h)];
+  if (hi) pts = fitCorners(hi, pts.map(p => ({ x: p.x * hi.width / W, y: p.y * hi.height / H }))).map(p => ({ x: p.x * W / hi.width, y: p.y * H / hi.height }));
+  return { pts: pts.map(p => ({ x: p.x / W * 100, y: p.y / H * 100 })), deg: best.deg, cx: best.cx, cy: best.cy, size: best.size, score: best.score, busy: best.busy };
+}
+/* move each corner a few pixels at a time while the edges under the four sides get stronger */
+function fitCorners(cv, pts) {
+  const W = cv.width, H = cv.height, d = cv.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  const CAP = 40, gx = new Float32Array(W * H), gy = new Float32Array(W * H);
+  const diff = (a, c) => Math.max(Math.abs(d[a] - d[c]), Math.abs(d[a + 1] - d[c + 1]), Math.abs(d[a + 2] - d[c + 2]));
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x, j = i * 4;
+    gx[i] = Math.min(CAP, diff(j + 4, j - 4)) / CAP; gy[i] = Math.min(CAP, diff(j + W * 4, j - W * 4)) / CAP;
+  }
+  const side = (p, q) => {
+    const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy); if (len < 4) return 0;
+    const nx = -dy / len, ny = dx / len, ax = Math.abs(nx), ay = Math.abs(ny), n = Math.max(8, Math.round(len / 1.5));
+    let sum = 0;
+    for (let k = 0; k < n; k++) {
+      const f = 0.1 + 0.8 * k / (n - 1), x = p.x + dx * f, y = p.y + dy * f; let e = 0;
+      for (let o = -1; o <= 1; o++) {
+        const xi = Math.round(x + nx * o), yi = Math.round(y + ny * o);
+        if (xi < 1 || yi < 1 || xi >= W - 1 || yi >= H - 1) continue;
+        const i = yi * W + xi, v = ax * gx[i] + ay * gy[i]; if (v > e) e = v;
+      }
+      sum += e;
+    }
+    return sum / n;
+  };
+  const score = q => { const s = [side(q[0], q[1]), side(q[1], q[2]), side(q[2], q[3]), side(q[3], q[0])]; return (s[0] + s[1] + s[2] + s[3]) / 4 * 0.7 + Math.min(...s) * 0.3; };
+  const start = pts.map(p => ({ ...p })), reach = Math.hypot(pts[0].x - pts[3].x, pts[0].y - pts[3].y) * 0.07;
+  let cur = pts.map(p => ({ ...p })), s = score(cur);
+  for (const step of [3, 2, 1, 1]) {
+    for (let k = 0; k < 4; k++) {
+      let bestP = cur[k], bestS = s;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const np = { x: cur[k].x + dx * step, y: cur[k].y + dy * step };
+        if (Math.hypot(np.x - start[k].x, np.y - start[k].y) > reach) continue;
+        const q = cur.slice(); q[k] = np; const v = score(q);
+        if (v > bestS + 1e-4) { bestS = v; bestP = np; }
+      }
+      cur[k] = bestP; s = bestS;
+    }
+  }
+  return cur;
+}
+/* the 3 x 3 map that sends the corners of a w x h box to the four points q (perspective) */
+function boxToQuad(w, h, q) {
+  const src = [[0, 0], [w, 0], [w, h], [0, h]], A = [], B = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], u = q[i].x, v = q[i].y;
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); B.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); B.push(v);
+  }
+  for (let c = 0; c < 8; c++) {
+    let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]]; [B[c], B[p]] = [B[p], B[c]];
+    const piv = A[c][c]; if (Math.abs(piv) < 1e-12) return null;
+    for (let r = 0; r < 8; r++) if (r !== c) { const f = A[r][c] / piv; if (!f) continue; for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k]; B[r] -= f * B[c]; }
+  }
+  return B.map((v, i) => v / A[i][i]);
+}
+/* cut the card out of src along four corners (in src pixels) and lay it flat and straight, w x h */
+function flattenQuad(src, sw, sh, q, w, h) {
+  const m = boxToQuad(w, h, q); if (!m) return null;
+  const x0 = Math.max(0, Math.floor(Math.min(...q.map(p => p.x))) - 1), y0 = Math.max(0, Math.floor(Math.min(...q.map(p => p.y))) - 1);
+  const x1 = Math.min(sw, Math.ceil(Math.max(...q.map(p => p.x))) + 1), y1 = Math.min(sh, Math.ceil(Math.max(...q.map(p => p.y))) + 1);
+  const bw = x1 - x0, bh = y1 - y0; if (bw < 2 || bh < 2) return null;
+  const tmp = document.createElement("canvas"); tmp.width = bw; tmp.height = bh;
+  const tc = tmp.getContext("2d", { willReadFrequently: true }); tc.drawImage(src, x0, y0, bw, bh, 0, 0, bw, bh);
+  const sd = tc.getImageData(0, 0, bw, bh).data;
+  const out = document.createElement("canvas"); out.width = w; out.height = h;
+  const oc = out.getContext("2d"), img = oc.createImageData(w, h), od = img.data;
+  const [a, b, c, d, e, f, g, k] = m;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const z = g * x + k * y + 1, sx = (a * x + b * y + c) / z - x0, sy = (d * x + e * y + f) / z - y0;
+    const ix = Math.floor(sx), iy = Math.floor(sy), o = (y * w + x) * 4;
+    if (ix < 0 || iy < 0 || ix >= bw - 1 || iy >= bh - 1) { od[o + 3] = 255; continue; }
+    const fx = sx - ix, fy = sy - iy, p = (iy * bw + ix) * 4, p2 = p + bw * 4;
+    for (let ch = 0; ch < 3; ch++) {
+      const top = sd[p + ch] + (sd[p + 4 + ch] - sd[p + ch]) * fx, bot = sd[p2 + ch] + (sd[p2 + 4 + ch] - sd[p2 + ch]) * fx;
+      od[o + ch] = top + (bot - top) * fy;
+    }
+    od[o + 3] = 255;
+  }
+  oc.putImageData(img, 0, 0);
+  return out;
+}
+
+
+const cards=["ja/SV/SV8a/010","en/sv/sv03.5/006","ja/SV/SV2a/151","en/swsh/swsh12.5/GG01","zh-tw/SV/SV9/001"];
+const load=u=>new Promise((r,j)=>{const i=new Image();i.crossOrigin="anonymous";i.onload=()=>r(i);i.onerror=()=>r(null);i.src=u;});
+function bg(ctx,W,H,kind,seed){let x=seed;const rnd=()=>(x=(x*16807)%2147483647)/2147483647;
+ if(kind==0){ctx.fillStyle="#6b4f35";ctx.fillRect(0,0,W,H);for(let i=0;i<300;i++){ctx.strokeStyle=`rgba(${40+rnd()*60|0},${25+rnd()*30|0},10,.4)`;ctx.beginPath();const y=rnd()*H;ctx.moveTo(0,y);ctx.bezierCurveTo(W/3,y+rnd()*20-10,W*2/3,y+rnd()*20-10,W,y+rnd()*10);ctx.stroke();}}
+ else if(kind==1){ctx.fillStyle="#d8d8d4";ctx.fillRect(0,0,W,H);for(let i=0;i<4000;i++){ctx.fillStyle=`rgba(0,0,0,${rnd()*.08})`;ctx.fillRect(rnd()*W,rnd()*H,3,3);}}
+ else if(kind==2){ctx.fillStyle="#111";ctx.fillRect(0,0,W,H);ctx.fillStyle="#333";ctx.fillRect(W*.1,H*.05,W*.8,H*.9);}
+ else {ctx.fillStyle="#fff";ctx.fillRect(0,0,W,H);ctx.fillStyle="#ddd";for(let i=0;i<20;i++)ctx.fillRect(0,i*H/20,W,2);}}
+/* draw img onto quad q by a grid of small affine pieces */
+function drawQuad(ctx,img,q,shadow){const w=img.naturalWidth,h=img.naturalHeight,m=boxToQuad(w,h,q);const P=(x,y)=>{const z=m[6]*x+m[7]*y+1;return{x:(m[0]*x+m[1]*y+m[2])/z,y:(m[3]*x+m[4]*y+m[5])/z};};
+ if(shadow){ctx.save();ctx.shadowColor="rgba(0,0,0,.5)";ctx.shadowBlur=12;ctx.fillStyle="#000";ctx.beginPath();q.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.fill();ctx.restore();}
+ const N=16;for(let gy=0;gy<N;gy++)for(let gx=0;gx<N;gx++){const x0=gx*w/N,y0=gy*h/N,x1=(gx+1)*w/N,y1=(gy+1)*h/N;const a=P(x0,y0),b=P(x1,y0),c=P(x0,y1);
+  ctx.save();ctx.setTransform((b.x-a.x)/(x1-x0),(b.y-a.y)/(x1-x0),(c.x-a.x)/(y1-y0),(c.y-a.y)/(y1-y0),a.x,a.y);ctx.drawImage(img,x0,y0,(x1-x0)+0.6,(y1-y0)+0.6,0,0,(x1-x0)+0.6,(y1-y0)+0.6);ctx.restore();}}
+(async()=>{const out=document.getElementById("out");let lines=[],ok=0,n=0,tt=0;
+for(const c of cards){const img=await load(`https://assets.tcgdex.net/${c}/high.png`);if(!img){lines.push(c+" no image");continue;}
+ for(let t=0;t<10;t++){
+  const W=600,H=800,cv=document.createElement("canvas");cv.width=W;cv.height=H;const ctx=cv.getContext("2d");
+  bg(ctx,W,H,t%4,t*977+5);
+  const fill=[0.8,0.7,0.6,0.75,0.55,0.85,0.65,0.7,0.6,0.72][t];const h=H*fill,w=h*63/88;
+  const cx=W/2+[0,-20,30,10,-40,0,30,-10,20,0][t], cy=H/2+[0,20,-30,15,40,0,-20,25,0,0][t];
+  const rot=[0,8,-14,20,-24,4,12,-6,0,17][t]*Math.PI/180;
+  const tilt=[0,0,0.08,0,0.12,0.1,0,0.06,0.14,0.05][t]; /* far edge narrower */
+  const loc=[[-w/2*(1-tilt),-h/2],[w/2*(1-tilt),-h/2],[w/2,h/2],[-w/2,h/2]];
+  const q=loc.map(([x,y])=>({x:cx+x*Math.cos(rot)-y*Math.sin(rot),y:cy+x*Math.sin(rot)+y*Math.cos(rot)}));
+  drawQuad(ctx,img,q,t%2);
+  const sm=document.createElement("canvas");sm.width=120;sm.height=160;sm.getContext("2d").drawImage(cv,0,0,120,160);
+  const hi=document.createElement("canvas");hi.width=360;hi.height=480;hi.getContext("2d").drawImage(cv,0,0,360,480);
+  const t0=performance.now(),r=findQuad(sm,hi),ms=performance.now()-t0;tt+=ms;n++;
+  const want=q.map(p=>({x:p.x/W*100,y:p.y/H*100}));
+  const err=r?Math.max(...r.pts.map((p,i)=>Math.hypot(p.x-want[i].x,p.y-want[i].y))):99;
+  const good=err<2.5;if(good)ok++;
+  lines.push(`${c} t${t} ${good?"OK ":"BAD"} rot ${(rot*180/Math.PI).toFixed(0)} tilt ${tilt} got deg ${r?r.deg.toFixed(1):"-"} maxerr ${err.toFixed(2)}% ${ms.toFixed(0)}ms`);
+  if(!good||t==4){const g=cv.getContext("2d");g.strokeStyle="#0f0";g.lineWidth=3;if(r){g.beginPath();r.pts.forEach((p,i)=>{const X=p.x*W/100,Y=p.y*H/100;i?g.lineTo(X,Y):g.moveTo(X,Y);});g.closePath();g.stroke();}
+   cv.style.width="150px";document.getElementById("pics").appendChild(cv);
+   if(r){const f=flattenQuad(cv,W,H,r.pts.map(p=>({x:p.x*W/100,y:p.y*H/100})),252,352);if(f){f.style.width="110px";document.getElementById("pics").appendChild(f);}}}
+ }}
+for(let k=0;k<4;k++){const sm=document.createElement("canvas");sm.width=120;sm.height=160;bg(sm.getContext("2d"),120,160,k,k*31+7);const r=findQuad(sm);lines.push(`empty bg${k}: ${r?"FALSE HIT "+r.score.toFixed(2):"none ok"}`);}
+out.textContent=`${ok}/${n} found, avg ${(tt/n).toFixed(0)}ms\n`+lines.join("\n");document.title="done";})();
+</script>
