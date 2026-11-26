@@ -118,6 +118,8 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .sheet-head h2{margin:0;font:800 19px/1.1 var(--f-display);font-stretch:85%}
 .close{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:18px;line-height:1}
 .sheet-body{overflow:auto;padding:16px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px}
+/* the sheet scrolls; nothing in it is squashed to fit (a squashed camera box crops the picture, like a zoomed-in lens) */
+.sheet-body>*{flex-shrink:0}
 .section-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 6px}
 
 .pickers{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -3826,7 +3828,7 @@ Store.onChange(() => {
  const img=new Image(); img.crossOrigin="anonymous";
  img.onerror=()=>{window.FAKE.err='img';};img.onload=()=>{try{bg();const ch=H*0.6,cw=ch*63/88,a=rot*Math.PI/180,cx=W*0.5,cy=H*0.5;
   const base=[[-cw/2,-ch/2],[cw/2,-ch/2],[cw/2,ch/2],[-cw/2,ch/2]].map(([x,y],k)=>{const s=1+(k<2?-tilt:tilt)*0.5,X=x*s,Y=y;return{x:cx+X*Math.cos(a)-Y*Math.sin(a),y:cy+X*Math.sin(a)+Y*Math.cos(a)};});
-  warp(img,base);}catch(e){window.FAKE.err=String(e);}window.FAKE={...window.FAKE,ready:true,q:base.map(p=>({x:+(p.x/W*100).toFixed(1),y:+(p.y/H*100).toFixed(1)}))};};
+  warp(img,base);window.FAKE.ready=true;}catch(e){window.FAKE.err=String(e);}window.FAKE={...window.FAKE,ready:true,q:base.map(p=>({x:+(p.x/W*100).toFixed(1),y:+(p.y/H*100).toFixed(1)}))};};
  img.src=`https://assets.tcgdex.net/${card}/high.png`;
  const vis=document.createElement("canvas");vis.width=W;vis.height=H;const vg=vis.getContext("2d");
  setInterval(()=>{vg.drawImage(cv,0,0);},100);
