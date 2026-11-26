@@ -157,7 +157,7 @@ function findQuad(cv) {
     if (long < H * 0.35) continue;
     const asp = short / long; if (asp < 0.6 || asp > 0.84) continue;
     /* upright cards only: the long sides run up and down (turned up to about 35 degrees) */
-    const ls = sA > sB ? 1 : 0, lv = { x: c[ls + 1].x - c[ls].x, y: c[ls + 1].y - c[ls].y };
+    const ls = sA > sB ? 0 : 1, lv = { x: c[ls + 1].x - c[ls].x, y: c[ls + 1].y - c[ls].y };
     if (Math.abs(lv.y) < Math.abs(lv.x) * 1.4) continue;
     const cov = [0, 1, 2, 3].map(k => cover(c[k], c[(k + 1) % 4])), lo = Math.min(...cov);
     if (lo < 0.4) continue;
