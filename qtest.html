@@ -109,8 +109,8 @@ function findQuad(cv) {
   for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
     const i = y * W + x; if (!edge[i]) continue;
     let t0 = Math.round(ang[i] * NT / Math.PI); const w = Math.min(1, step[i] / 40);
-    for (let k = -3; k <= 3; k++) {
-      const t = ((t0 + k) % NT + NT) % NT, rf = x * COS[t] + y * SIN[t] + D, r = Math.floor(rf), f = rf - r, v = w * (k === 0 ? 1 : k * k === 1 ? 0.8 : 0.5);
+    for (let k = -6; k <= 6; k++) {
+      const t = ((t0 + k) % NT + NT) % NT, rf = x * COS[t] + y * SIN[t] + D, r = Math.floor(rf), f = rf - r, v = w * (1 - Math.abs(k) / 9);
       acc[t * NR + r] += v * (1 - f); acc[t * NR + r + 1] += v * f;
     }
   }
