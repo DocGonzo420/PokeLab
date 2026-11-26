@@ -221,7 +221,7 @@ function findQuad(cv) {
   else for (const k of cands) if (k.asp < 0.06 && (!best || k.s > best.s)) best = k;
   if (!best) return null;
   /* a card lying on a mat, or in a sleeve or top loader: the card is the smaller outline inside the bigger one */
-  {
+  if (!twin) {
     let inner = null;
     for (const n of cands) {
       if (n === best || n.area > best.area * 0.75 || n.s < 0.8 || n.s < best.s - 0.15 || n.asp > 0.08) continue;
