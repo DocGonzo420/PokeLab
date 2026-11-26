@@ -156,9 +156,6 @@ dialog.sheet::backdrop{background:rgb(8 10 14 / .55)}
 .scan.quad .scan-quad{display:block}
 .scan.quad .scan-frame{border-color:transparent;box-shadow:none}
 .scan.quad .scan-num{display:none}
-.scan-quad .q-mask{fill:rgba(0,0,0,.45);fill-rule:evenodd}
-.scan-quad .q-card{fill:none;stroke:#ffd54a;stroke-width:3;stroke-linejoin:round}
-.scan-quad .q-num{fill:none;stroke:#ffd36b;stroke-width:2;stroke-dasharray:6 4}
 .scan.seen .scan-quad .q-card,.scan.seen .scan-quad .q-num{stroke:#8be0a4;stroke-dasharray:none}
 .scan-focus{position:absolute;width:60px;height:60px;margin:-30px 0 0 -30px;border:2px solid #ffd36b;border-radius:50%;opacity:0;transform:scale(1.4);transition:opacity .25s,transform .25s;pointer-events:none}
 .scan-focus.on{opacity:1;transform:scale(1)}
@@ -1699,15 +1696,18 @@ function showQuad(pts) {
   Scan.quad = pts ? { pts, at: Date.now() } : null;
   box.classList.toggle("quad", !!pts);
   if (!pts) return;
-  const m = boxToQuad(1, 1, pts); if (!m) return;
-  const path = ps => "M" + ps.map(p => p.x.toFixed(2) + " " + p.y.toFixed(2)).join("L") + "Z";
-  svg.querySelector(".q-mask").setAttribute("d", "M0 0H100V100H0Z" + path(pts));
-  svg.querySelector(".q-card").setAttribute("d", path(pts));
+  /* drawn in the box's own pixels, so the lines keep an even width */
+  const bw = box.clientWidth, bh = box.clientHeight, px = pts.map(p => ({ x: p.x / 100 * bw, y: p.y / 100 * bh }));
+  const m = boxToQuad(1, 1, px); if (!m) return;
+  const path = ps => "M" + ps.map(p => p.x.toFixed(1) + " " + p.y.toFixed(1)).join(" L") + " Z";
+  svg.setAttribute("viewBox", `0 0 ${bw} ${bh}`);
+  svg.querySelector(".q-mask").setAttribute("d", `M0 0 H${bw} V${bh} H0 Z ` + path(px));
+  svg.querySelector(".q-card").setAttribute("d", path(px));
   svg.querySelector(".q-num").setAttribute("d", path([[0.04, 0.86], [0.96, 0.86], [0.96, 0.98], [0.04, 0.98]].map(([u, v]) => quadPoint(m, u, v))));
 }
 const autoFrameOn = () => ScanPrefs.auto !== false;
 async function autoFrameLoop(run) {
-  const video = $("#scanVideo"), box = $("#scanBox"); let prev = null, prevQ = null, misses = 0;
+  const video = $("#scanVideo"), box = $("#scanBox"); let prev = null, prevQ = null, misses = 0, qMiss = 0;
   showQuad(null);
   while (run === Scan.run) {
     await pause(220);
@@ -1719,7 +1719,7 @@ async function autoFrameLoop(run) {
     try { quad = hq && findQuad(hq); } catch (e) { quad = null; }
     if (run !== Scan.run) break;
     if (quad) {
-      misses = 0; prev = null;
+      misses = 0; qMiss = 0; prev = null;
       /* two looks in a row that agree, so a passing hand doesn't move the outline */
       const same = prevQ && quad.pts.every((p, k) => Math.abs(p.x - prevQ.pts[k].x) < 3 && Math.abs(p.y - prevQ.pts[k].y) < 3);
       prevQ = quad; if (!same) continue;
@@ -1733,6 +1733,8 @@ async function autoFrameLoop(run) {
       continue;
     }
     prevQ = null;
+    /* one missed look doesn't drop the outline; a few in a row do */
+    if (Scan.quad && ++qMiss < 5) continue;
     /* no four edges: fall back to the upright card finder */
     const cv = boxSnapshot(video, box); if (!cv) continue;
     const hit = findCard(cv);
@@ -2373,7 +2375,7 @@ function renderAdd() {
   if (add.step === "binder") { renderBinder(b); return; }
   if (add.step === "scan") {
     b.innerHTML = `
-      <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view. Tap to focus."></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div><svg class="scan-quad" id="scanQuad" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path class="q-mask"/><path class="q-card" vector-effect="non-scaling-stroke"/><path class="q-num" vector-effect="non-scaling-stroke"/></svg><span class="scan-focus" id="scanFocus" aria-hidden="true"></span></div>
+      <div class="scan" id="scanBox"><video id="scanVideo" playsinline muted autoplay aria-label="Camera view. Tap to focus."></video><div class="scan-frame" id="scanFrame"><span class="scan-num" aria-hidden="true"></span></div><svg class="scan-quad" id="scanQuad" aria-hidden="true"><path class="q-mask" fill="rgba(0,0,0,.45)" fill-rule="evenodd"/><path class="q-card" fill="none" stroke="#ffd54a" stroke-width="3" stroke-linejoin="round"/><path class="q-num" fill="none" stroke="#ffd36b" stroke-width="2" stroke-dasharray="6 4"/></svg><span class="scan-focus" id="scanFocus" aria-hidden="true"></span></div>
       <div class="seg" role="group" aria-label="Scan mode"><button type="button" data-smode="auto" aria-pressed="${!scanShotMode()}">Continuous</button><button type="button" data-smode="shot" aria-pressed="${scanShotMode()}">Single shot</button></div>
       <p class="muted" id="scanHint" role="status" style="margin:0">${Scan.added ? esc(scanAddedMsg()) : "Starting the camera…"}</p>
       <div class="field"><label for="langSel">Card language</label><select id="langSel">${LANGS.filter(x => x[0] !== "other").map(([k, l]) => `<option value="${k}" ${k === scanLang() ? "selected" : ""}>${l}</option>`).join("")}</select><p class="src" id="langNote" style="margin:4px 0 0"></p></div>
